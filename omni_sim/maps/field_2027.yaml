@@ -1,0 +1,147 @@
+# =============================================================================
+# ABU Robocon 2027 Solo, Indonesia -- "The Pursuit of Mustika Nusantara"
+# Field geometry, machine-readable.  Source: Theme & Rules v1.0 (Aug 2026).
+#
+# Units: metres.  Frame: origin (0,0) = SOUTH-WEST corner of the 11 x 11 m
+# field, +x -> east, +y -> north, +z up.  RED team owns x < 5.5, BLUE x > 5.5.
+#
+# Every number carries a provenance tag:
+#   [R] literally stated in the rulebook text  -> trust it
+#   [F] scaled off Figure 2 / Figure 3         -> ESTIMATE, replace when the
+#                                                 official dimension drawing
+#                                                 or CAD is published
+# Only [F] values should ever need editing; the generator reads this file, so
+# nothing downstream hard-codes geometry.
+# =============================================================================
+
+meta:
+  name: abu_robocon_2027
+  rulebook: "v1.0 (August 2026)"
+  resolution: 0.02          # m/cell for the generated occupancy grids
+  wall_thickness: 0.05      # m, drawn thickness of fences/barriers
+
+field:
+  size: [11.0, 11.0]        # [R] 11000 x 11000 mm
+  center_x: 5.5             # [R] red/blue split
+
+levels:
+  ground: {z: 0.0}
+  l1:     {z: 0.60}         # [R] 600 mm above ground
+  l2:     {z: 0.90}         # [R] 300 mm above L1
+
+# --- raised platforms --------------------------------------------------------
+platforms:
+  # [R] size 6000 x 6000; [F] centred in the field
+  l1: {rect: [2.50, 2.50, 8.50, 8.50]}
+  # [R] size 3000 x 3000; [F] centred on L1
+  l2: {rect: [4.00, 4.00, 7.00, 7.00]}
+
+# 1000 x 1000 pocket cut out of the L1 slab at north centre.  The Mustika
+# Pillar stands on GROUND level inside it, and it doubles as the "additional
+# shared area of 1000 x 1000 around the Mustika Pillar" [R].  [F] position.
+notches:
+  mustika_pocket: {rect: [5.00, 7.50, 6.00, 8.50]}
+
+# --- vertical circulation ----------------------------------------------------
+# [R] ramp length 3500 mm; [F] width 1000 and north-south placement on the
+# outer face of L1 (Figure 1 shows a wedge hanging off the platform side).
+ramps:
+  red:  {rect: [1.50, 4.50, 2.50, 8.00], from: ground, to: l1}
+  blue: {rect: [8.50, 4.50, 9.50, 8.00], from: ground, to: l1}
+
+# [R] each step 300 (run) x 1000 (width) x 150 (rise) -> 4 steps ground->L1,
+# 2 steps L1->L2.  [F] placement.
+stairs:
+  l1_red:  {rect: [3.00, 1.30, 4.00, 2.50], steps: 4, from: ground, to: l1}
+  l1_blue: {rect: [7.00, 1.30, 8.00, 2.50], steps: 4, from: ground, to: l1}
+  l2_red:  {rect: [3.40, 5.00, 4.00, 6.00], steps: 2, from: l1, to: l2}
+  l2_blue: {rect: [7.00, 5.00, 7.60, 6.00], steps: 2, from: l1, to: l2}
+
+# --- pillars -----------------------------------------------------------------
+pillars:
+  # [R] h500, d270, concave cup d180 x 100 deep, stands on the Ground Area
+  mustika: {center: [5.50, 8.00], diameter: 0.270, height: 0.50, level: ground}
+  # [R] h800, d270, stands on L2
+  central: {center: [5.50, 5.50], diameter: 0.270, height: 0.80, level: l2}
+
+# --- fences ------------------------------------------------------------------
+# [R] "Center Divider: a fence along the centre line of the Ground Area and
+# Level 1".  [F] the gaps: it cannot cross a shared area or a building spot.
+fences:
+  center_divider_ground:
+    - {seg: [5.50, 0.00, 5.50, 1.00]}     # south of the Ground Shared Area
+    - {seg: [5.50, 2.20, 5.50, 2.50]}     # between shared area and L1 slab
+    - {seg: [5.50, 8.50, 5.50, 11.00]}    # north of L1, beyond the pocket
+  center_divider_l1:
+    - {seg: [5.50, 2.50, 5.50, 3.00]}     # stops at the L1 shared building spot
+    - {seg: [5.50, 3.50, 5.50, 4.00]}     # resumes, stops at the L2 slab
+  l1_perimeter_barrier:                    # [R] anti-fall barrier around L1
+    - {rect: [2.50, 2.50, 8.50, 8.50], outline: true}
+
+# --- zones (no collision geometry: markings, scoring and task targets) -------
+zones:
+  # [R] 1000 x 2000, 20 Earth Blocks each; [F] north corners
+  storage:
+    red:  {rect: [0.70, 9.40, 2.70, 10.40]}
+    blue: {rect: [8.30, 9.40, 10.30, 10.40]}
+  # [R] two 700 x 700 boxes per team, doubles as the ground Retry Zone
+  start:
+    red:  [{rect: [0.70, 0.50, 1.40, 1.20]}, {rect: [1.60, 0.50, 2.30, 1.20]}]
+    blue: [{rect: [9.60, 0.50, 10.30, 1.20]}, {rect: [8.70, 0.50, 9.40, 1.20]}]
+  # [R] 700 x 700 on L1, one per team; [F] north corners of L1
+  retry_l1:
+    red:  {rect: [2.70, 7.60, 3.40, 8.30]}
+    blue: {rect: [7.60, 7.60, 8.30, 8.30]}
+  # [R] 1000 x 1000 at the boundary of L1, TR<->BR handover
+  transfer:
+    red:  {rect: [2.50, 3.20, 3.50, 4.20]}
+    blue: {rect: [7.50, 3.20, 8.50, 4.20]}
+  # [R] 1200 x 1200, holds the 12 Sky Blocks on a 5x5 chessboard, centre empty
+  ground_shared: {rect: [4.90, 1.00, 6.10, 2.20]}
+  # [R] contested strip on the red/blue boundary of L1; [F] extent
+  l1_shared:
+    - {rect: [5.00, 2.50, 6.00, 4.00]}
+    - {rect: [5.00, 7.00, 6.00, 7.50]}
+  # [R] the whole of L2 is shared
+  l2_shared: {rect: [4.00, 4.00, 7.00, 7.00]}
+
+# [R] 500 x 500 green squares; a Complete Tower = Earth + Earth + Sky.
+# [F] all positions.  size is the square's side, position is its centre.
+building_spots:
+  size: 0.50
+  l1_red:    [[3.25, 5.50], [4.25, 8.00]]
+  l1_blue:   [[7.75, 5.50], [6.75, 8.00]]
+  l1_shared: [[5.50, 3.25], [5.50, 7.25]]
+  l2_shared: [[4.50, 4.50], [6.50, 4.50], [4.50, 6.50], [6.50, 6.50]]
+
+# --- game objects ------------------------------------------------------------
+objects:
+  earth_block: {size: 0.350, mass: 0.600, count_per_team: 20}   # [R]
+  sky_block:   {size: 0.200, mass: 0.220, count: 12}            # [R]
+  mustika:     {diameter: 0.210, mass: 0.270}                   # [R] Mikasa V300W
+
+robot_limits:                                                   # [R] section 11
+  start_envelope: [0.70, 0.70, 0.70]
+  max_envelope:   [1.00, 1.40, 1.20]   # width x length x height, extended
+  mass_max: 50.0
+  battery_nominal_v_max: 24.0
+
+# --- rulebook section 14 colours (R,G,B 0-255), used by the renderer ---------
+colors:
+  ground_red:      [240, 210, 210]
+  ground_blue:     [170, 210, 230]
+  ground_shared:   [245, 240, 200]
+  start_red:       [223,  34,  34]
+  start_blue:      [ 50,   0, 255]
+  l1_red:          [235, 180, 160]
+  l1_blue:         [150, 215, 220]
+  l1_shared:       [245, 240, 200]
+  ramp_red:        [200, 150, 140]
+  ramp_blue:       [130, 180, 200]
+  transfer_red:    [245, 170,  60]
+  transfer_blue:   [ 60, 170, 245]
+  building_spot:   [ 40, 100,  50]
+  l2_area:         [190, 190, 185]
+  barrier:         [190, 190, 185]
+  pillar:          [100,  62,   0]
+  boundary:        [100,  62,   0]

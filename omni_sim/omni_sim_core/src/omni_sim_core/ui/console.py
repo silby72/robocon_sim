@@ -104,6 +104,24 @@ class Section:
     title_color: str = _FG_ACCENT
 
 
+def _force_utf8_stdout() -> None:
+    """Make stdout able to carry the panel glyphs.
+
+    The dashboard draws with box characters, a braille spinner and U+00B7. On a
+    Japanese Windows install stdout defaults to cp932, which cannot encode any
+    of them, and the first ``render`` dies with UnicodeEncodeError. Nothing
+    here is lossy for an already-UTF-8 stream, and ``errors="replace"`` keeps a
+    hostile console from taking the simulation down with it.
+    """
+    enc = (getattr(sys.stdout, "encoding", None) or "").lower().replace("-", "")
+    if enc in ("utf8", "utf8mb4"):
+        return
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, OSError, ValueError):
+        pass  # not a reconfigurable stream; the glyphs degrade, the run lives
+
+
 class ConsoleDashboard:
     """Clear-and-redraw terminal dashboard.
 
@@ -127,6 +145,7 @@ class ConsoleDashboard:
         self._last_render = 0.0
 
     def start(self) -> None:
+        _force_utf8_stdout()
         sys.stdout.write("\033[?25l")  # hide cursor
         sys.stdout.flush()
         self._started = True

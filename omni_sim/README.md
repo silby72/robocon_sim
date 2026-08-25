@@ -23,6 +23,34 @@ maps/            map_server-compatible PGM + YAML
 experiments/     headless sweeps, frequency response, plotting
 ```
 
+## Setup
+
+```bash
+python setup_env.py            # venv + deps + VS Code, safe to re-run any time
+python setup_env.py --check    # show what would change, touch nothing
+python setup_env.py --verify   # ...and prove it works: run the tests, regen maps
+```
+
+Re-run it whenever dependencies move — it is idempotent and syncs rather than
+reinstalls. It reads the dependency list straight out of
+`omni_sim_core/pyproject.toml`, so **add new runtime dependencies there**, not
+to the setup script; only editor extensions and the default extras list live in
+the CONFIG block at the top of `setup_env.py`.
+
+Useful flags:
+
+| flag | when |
+|---|---|
+| `--system` | inside a sourced ROS 2 env — never stack a venv on top of ROS |
+| `--python 3.12 --recreate` | rebuild the venv on another interpreter |
+| `--extras test,viz,viz-extra` | pick which pyproject extras to install |
+| `--no-vscode` | skip editor setup |
+
+On Windows, a `DLL load failed` on a freshly released Python is usually Smart
+App Control refusing a low-reputation wheel, not a broken package; the script
+detects this and prints the options. `--python 3.12 --recreate` is the cheap
+way out.
+
 ## Quick start (no ROS needed)
 
 ```bash

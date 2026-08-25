@@ -15,6 +15,10 @@ Everything in the core runs without ROS. Use `PYTHONPATH=omni_sim_core/src` (or
 `pip install -e omni_sim_core[test,viz]`).
 
 ```bash
+# environment: idempotent, re-run whenever deps move. Reads the dependency list
+# from omni_sim_core/pyproject.toml -- add runtime deps THERE, not to the script.
+python setup_env.py [--check|--verify|--system|--python 3.12 --recreate]
+
 # tests (18: 9 acceptance in test_acceptance.py + 9 unit in test_components.py)
 PYTHONPATH=omni_sim_core/src pytest omni_sim_core/tests -q
 PYTHONPATH=omni_sim_core/src pytest omni_sim_core/tests/test_acceptance.py::test_dhat_converges_to_disturbance -q   # single test

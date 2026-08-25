@@ -31,7 +31,12 @@ from omni_sim_core.env.occupancy_grid import (                    # noqa: E402
 from omni_sim_core.ui.viewer import RealtimeViewer, ViewerConfig  # noqa: E402
 
 
-def build(map_yaml: str | None, duration: float):
+# rectangular loop dodging the obstacle in field.yaml (~x in [3.0,3.3],
+# y in [1.5,2.5]).  Override with --waypoints for a different map.
+DEFAULT_WAYPOINTS = [[1.0, 1.0], [5.0, 1.0], [5.0, 3.0], [1.0, 3.0], [1.0, 1.0]]
+
+
+def build(map_yaml: str | None, duration: float, waypoints=None):
     clk = ClockConfig(dt_sim=1e-3, dt_motor=1e-3, dt_nav=2e-2)
     sim = RobotSim(RobotConfig(clock=clk), seed=0)
 
@@ -40,14 +45,13 @@ def build(map_yaml: str | None, duration: float):
     else:
         grid = generate_rect_field(6.0, 4.0, 0.05)
 
-    # rectangular loop dodging the obstacle (~x in [3.0,3.3], y in [1.5,2.5])
-    waypoints = np.array([[1.0, 1.0], [5.0, 1.0], [5.0, 3.0],
-                          [1.0, 3.0], [1.0, 1.0]])
+    waypoints = np.asarray(waypoints if waypoints is not None
+                           else DEFAULT_WAYPOINTS, dtype=float)
     traj = Trajectory(waypoints, TrajectoryParams(v_max=1.2, a_max=1.5, dt=0.02))
     follower = TrajectoryFollower(traj, PIDParams(kp=2.0, ki=0.0, kd=0.0),
                                   dt=clk.dt_nav, v_max=1.5)
 
-    sim.reset(pose=np.array([1.0, 1.0, 0.0]))
+    sim.reset(pose=np.array([waypoints[0][0], waypoints[0][1], 0.0]))
 
     lidar = Lidar(LidarParams(n_beams=240, enable_motion_distortion=False),
                   grid, np.random.default_rng(0))
@@ -62,10 +66,18 @@ def main(argv=None) -> None:
     ap.add_argument("--map", default=str(ROOT / "maps" / "field.yaml"))
     ap.add_argument("--duration", type=float, default=20.0)
     ap.add_argument("--save", default=None, help="write a GIF instead of a window")
+    ap.add_argument("--waypoints", default=None,
+                    help="loop to track, as 'x,y x,y ...' in metres. The first "
+                         "point is also the start pose. Default suits "
+                         "maps/field.yaml; a different map needs its own.")
     args = ap.parse_args(argv)
 
+    wp = None
+    if args.waypoints:
+        wp = [[float(v) for v in pt.split(",")] for pt in args.waypoints.split()]
+
     map_yaml = args.map if Path(args.map).exists() else None
-    viewer = build(map_yaml, args.duration)
+    viewer = build(map_yaml, args.duration, wp)
 
     if args.save:
         out = Path(args.save)

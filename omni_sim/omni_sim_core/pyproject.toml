@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omni_sim_core"
+version = "1.0.0"
+description = "ROS-independent core simulator for an omni-directional robot (control / trajectory / estimation study)"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "pyyaml>=6.0",
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+viz = ["matplotlib>=3.6"]
+viz-extra = ["matplotlib>=3.6", "seaborn>=0.12"]  # seaborn is optional styling
+test = ["pytest>=7.4"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,24 @@
+# TRUE plant parameters (the "real" motor the DOB must compensate).
+# Independent from plant_nominal.yaml -- never sync these by hand.
+n_motors: 1
+
+inertia_kgm2: 5.0e-4        # J_m
+damping_nms: 1.0e-4         # B_m (viscous)
+torque_constant_nm_a: 0.5   # Kt
+resistance_ohm: 1.0         # R
+inductance_h: 1.0e-3        # L
+back_emf_v_s: 0.5           # Ke
+enable_electrical_dynamics: false
+
+# Friction (Coulomb + Stribeck). Zero for the "clean" acceptance tests.
+friction_coulomb_nm: 0.0
+friction_static_nm: 0.0
+stribeck_speed_rad_s: 0.1
+friction_smooth_eps: 1.0e-2
+
+enable_cogging: false
+cogging_amplitude_nm: 0.0
+cogging_pole_pairs: 8
+
+torque_max_nm: 5.0
+omega_max_rad_s: 500.0

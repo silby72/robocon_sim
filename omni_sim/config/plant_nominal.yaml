@@ -1,0 +1,6 @@
+# NOMINAL model the controller/DOB believes in.
+# Deliberately a SEPARATE file from plant_true.yaml (spec 9.1).
+# Contains no friction / cogging / saturation -- those become the "disturbance"
+# the DOB reconstructs.
+inertia_kgm2: 5.0e-4    # J_n
+damping_nms: 1.0e-4     # B_n

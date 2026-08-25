@@ -1,0 +1,31 @@
+name: "DOB step load rejection"
+seed: 42
+duration_s: 2.0
+
+clock:
+  dt_sim: 1.0e-4
+  dt_motor: 1.0e-3
+  dt_nav: 2.0e-2
+
+plant_true: config/plant_true.yaml
+plant_nominal: config/plant_nominal.yaml
+nominal_error:
+  j_ratio: 0.5      # J_n = 0.5 * J_true
+  b_ratio: 1.0
+
+controller:
+  type: pid_with_dob
+  setpoint_omega_rad_s: 50.0
+  pid: {kp: 0.02, ki: 0.0, kd: 0.0}
+  dob: {enabled: true, tau_q: 0.005, order: 1}
+
+disturbance:
+  - target: motor_torque
+    motor_index: 0
+    waveform: step
+    amplitude: 0.5
+    start_s: 1.0
+
+logging:
+  output: results/dob_step_load.csv
+  signals: [omega_true, omega_ref, tau_cmd, d_hat, d_true]

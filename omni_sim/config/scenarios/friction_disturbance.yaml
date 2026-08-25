@@ -1,0 +1,21 @@
+name: "DOB compensates unmodeled friction (Coulomb+Stribeck)"
+seed: 2
+duration_s: 3.0
+
+# NOTE: point plant_true at a friction-enabled motor to see the DOB treat
+# friction as a disturbance. Copy plant_true.yaml and set the friction fields.
+plant_true: config/plant_true_friction.yaml
+plant_nominal: config/plant_nominal.yaml
+nominal_error: {j_ratio: 1.0, b_ratio: 1.0}
+
+controller:
+  type: pid_with_dob
+  setpoint_omega_rad_s: 20.0
+  pid: {kp: 0.03, ki: 0.0, kd: 0.0}
+  dob: {enabled: true, tau_q: 0.008, order: 2}
+
+disturbance: []
+
+logging:
+  output: results/friction_disturbance.csv
+  signals: [omega_true, omega_ref, tau_cmd, tau_pid, d_hat]

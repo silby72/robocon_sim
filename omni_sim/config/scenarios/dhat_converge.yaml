@@ -1,0 +1,24 @@
+name: "DOB estimates a step disturbance (d_hat -> d)"
+seed: 1
+duration_s: 1.0
+
+plant_true: config/plant_true.yaml
+plant_nominal: config/plant_nominal.yaml
+nominal_error: {j_ratio: 1.0, b_ratio: 1.0}   # nominal == true
+
+controller:
+  type: pid_with_dob
+  setpoint_omega_rad_s: 30.0
+  pid: {kp: 0.02, ki: 0.0, kd: 0.0}
+  dob: {enabled: true, tau_q: 0.005, order: 1}
+
+disturbance:
+  - target: motor_torque
+    motor_index: 0
+    waveform: step
+    amplitude: 0.2
+    start_s: 0.5
+
+logging:
+  output: results/dhat_converge.csv
+  signals: [omega_true, omega_ref, tau_cmd, d_hat, d_true]

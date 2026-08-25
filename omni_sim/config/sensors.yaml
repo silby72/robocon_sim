@@ -1,0 +1,25 @@
+# Sensor stack defaults.
+imu:
+  rate_hz: 200.0
+  latency_s: 0.0
+  gyro_noise_std: 1.0e-3
+  gyro_bias_walk_std: 1.0e-5
+  gyro_scale_factor: 0.0
+  accel_noise_std: 1.0e-2
+  accel_bias_walk_std: 1.0e-4
+
+lidar:
+  rate_hz: 10.0
+  n_beams: 450
+  angle_min_rad: -3.14159265
+  angle_max_rad: 3.14159265
+  range_min_m: 0.12
+  range_max_m: 12.0
+  range_noise_std_m: 0.02
+  enable_motion_distortion: true
+  mount_x_m: 0.0
+  mount_y_m: 0.0
+
+encoder:
+  rate_hz: 1000.0
+  counts_per_rev: 8192

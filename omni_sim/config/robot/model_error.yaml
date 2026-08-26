@@ -1,0 +1,14 @@
+schema_version: 1
+
+# The nominal model the controller believes in is the TRUE plant scaled by these
+# ratios. 1.0 everywhere => nominal == true (the DOB-no-op test condition).
+# The true and nominal plants stay independently editable: setting mode to
+# 'manual' hands the nominal model entirely to a hand-written file, so the two
+# are never force-synced from a single number.
+ratios:
+  inertia_kgm2: 1.0
+  torque_constant_nm_a: 1.0
+  damping_nms: 1.0
+
+mode: ratio          # ratio | manual
+manual_file: null    # required when mode == manual: path to a hand-written nominal

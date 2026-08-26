@@ -1,0 +1,32 @@
+schema_version: 1
+
+# Each drive wheel's actuator_ref points here. An entry is either a preset plus
+# per-unit overrides, or a self-contained datasheet (preset: null).
+actuators:
+  m3508_fl:
+    preset: m3508_c620
+    overrides:
+      inertia_kgm2: 5.2e-4     # this unit measured slightly heavier; overrides derived J
+
+  m3508_fr:
+    preset: m3508_c620         # no overrides -> preset as-is
+
+  m3508_rl:
+    preset: m3508_c620
+
+  m3508_rr:
+    preset: m3508_c620
+
+  # Example of a fully hand-entered motor (not referenced by the chassis above,
+  # kept here to document the preset: null path).
+  custom_motor:
+    preset: null
+    datasheet:
+      rated_voltage_v: 24.0
+      kv_rpm_per_v: 170.0
+      stall_torque_nm: 2.5
+      stall_current_a: 12.0
+      no_load_speed_rpm: 4000.0
+      no_load_current_a: 0.5
+      rotor_inertia_kgm2: null   # unknown -> estimated (see derive.py)
+      encoder_cpr: 8192

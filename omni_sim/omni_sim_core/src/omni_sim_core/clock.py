@@ -8,10 +8,17 @@ Three independent, fully configurable periods drive the simulation:
 
 Controllers run under zero-order hold: between control ticks their command is
 held constant. ``dt_sim`` must divide the other periods (checked at startup).
+
+Integration and control are separate: the plant is integrated at ``dt_sim`` and
+the motor-loop controller (PID + DOB) updates only at ``dt_motor``. The control
+period can be set directly as ``control_rate_hz`` (a friendlier knob than a raw
+period); when given it overrides ``dt_motor = 1 / control_rate_hz``. This lets an
+experiment ask "how fast must this loop run?" independently of the integrator.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 
 def _is_integer_multiple(period: float, base: float, tol: float = 1e-9) -> bool:
@@ -24,6 +31,15 @@ class ClockConfig:
     dt_sim: float = 1.0e-4
     dt_motor: float = 1.0e-3
     dt_nav: float = 2.0e-2
+    # Optional: set the motor control rate directly (Hz). Overrides dt_motor.
+    # Default None keeps the current 1 kHz (dt_motor = 1 ms) behaviour.
+    control_rate_hz: Optional[float] = None
+
+    def __post_init__(self) -> None:
+        if self.control_rate_hz is not None:
+            if self.control_rate_hz <= 0:
+                raise ValueError("control_rate_hz must be > 0")
+            self.dt_motor = 1.0 / self.control_rate_hz
 
     def validate(self) -> None:
         if self.dt_sim <= 0 or self.dt_motor <= 0 or self.dt_nav <= 0:

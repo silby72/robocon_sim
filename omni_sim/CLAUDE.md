@@ -27,6 +27,11 @@ PYTHONPATH=omni_sim_core/src pytest omni_sim_core/tests/test_acceptance.py::test
 # --ui = live dashboard, real-time paced (--rtf 1.0 default; --rtf 0 = fastest).
 python3 run_sim.py --scenario config/scenarios/dob_step_load.yaml [--ui] [--rtf 1.0]
 
+# mechanism layer: build config/generated/plant_*.yaml from config/robot/* (needs ruamel).
+python tools/build_plant.py
+# GUI deps (Phase B+, PySide6) are a separate extra, never installed by default:
+python setup_env.py --extras gui
+
 # experiments (run from repo root; they inject omni_sim_core/src onto sys.path themselves)
 python experiments/plot_results.py results/dob_step_load.csv
 python experiments/sweep.py --n-tau 10 --n-j 5          # multiprocessing sweep
@@ -98,6 +103,28 @@ seaborn is optional styling (imported in a try/except); never a hard dep.
 rotated by `-theta`) with the linear speed clamped; the wheel jacobian expects
 body frame. Feeding a world-frame command, or refiring only once per animation
 frame instead of every `dt_nav`, makes the loop diverge — both were real bugs.
+
+**The mechanism layer turns a robot description into plant params, one way.**
+`mechanism/` (schema → derive → jacobian → build) reads `config/robot/*.yaml` +
+`config/presets/motors/*.yaml` and writes `config/generated/plant_*.yaml` +
+`jacobian.yaml`. It NEVER overwrites the hand-written `config/plant_*.yaml`.
+Rules that matter: `gear_ratio` is required (no implicit 1.0 — it hits reflected
+inertia as n²); estimated values (unknown rotor inertia, lumped damping) are
+tracked in `DerivedMotor.estimated` and tagged `# ESTIMATED` in output, never
+silently mixed with datasheet values; the drive jacobian raises
+`SingularConfigError` if `cond(J) > 1e6`. YAML is round-tripped with
+`mechanism/yaml_rt.py` (ruamel, comment/order-preserving, `null` kept literal).
+ruamel is a core dep but only `mechanism/*` imports it, so `import omni_sim_core`
+and the base 18 tests still work without it (mechanism tests `importorskip`).
+The nominal plant is generated via `model_error.yaml` (`ratio` or `manual` mode)
+— `manual` keeps a fully independent hand-written nominal, preserving the
+true/nominal separation. Scenarios select plants with a `plant: {true_model,
+nominal_model}` block; the legacy `plant_true`/`plant_nominal` keys still work.
+
+**Control rate is separate from the integration step.** `ClockConfig.control_
+rate_hz` sets `dt_motor = 1/rate`; integration runs at `dt_sim`, the PID+DOB loop
+updates only at the control rate (ZOH). The dt_sim-invariance acceptance test now
+means "hold control_rate_hz, halve dt_sim → same result".
 
 **Raycasting is vectorized over beams, looped over DDA steps** (`env/raycast.py`)
 — a per-beam Python loop can't sustain 450 beams @ 10 Hz. It returns `inf` on a

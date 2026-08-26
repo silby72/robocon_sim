@@ -65,6 +65,34 @@ python experiments/sweep.py --n-tau 10 --n-j 5                   # parallel swee
 python experiments/frequency_response.py                         # Bode of S with/without DOB
 ```
 
+## Robot description → plant (mechanism layer, Phase A)
+
+Describe the machine in `config/robot/` (chassis geometry, actuator datasheets)
+and generate the simulator's plant from it:
+
+```bash
+python tools/build_plant.py     # config/robot/* + presets → config/generated/plant_*.yaml
+```
+
+- `config/robot/chassis.yaml` — wheel layout, radii, **gear ratios (required)**, CoM.
+- `config/robot/actuators.yaml` — motor presets (`config/presets/motors/*.yaml`) + per-unit overrides, or a raw datasheet.
+- `config/robot/model_error.yaml` — nominal = true × ratios (`ratio` mode) or a fully hand-written nominal (`manual` mode).
+- Output goes to `config/generated/` with a `GENERATED` header; values that were
+  estimated (unknown rotor inertia, lumped damping) are tagged `# ESTIMATED`.
+  The hand-written `config/plant_*.yaml` are never overwritten.
+
+Scenarios pick which plant to use:
+
+```yaml
+plant:
+  true_model: config/generated/plant_true.yaml
+  nominal_model: config/generated/plant_nominal.yaml
+control_rate_hz: 1000.0    # motor loop rate; integration stays at clock.dt_sim
+```
+
+The GUI that edits these files (PySide6) is Phase B and installs separately
+(`python setup_env.py --extras gui`); nothing here depends on it.
+
 ## ROS 2 (Jazzy)
 
 ```bash

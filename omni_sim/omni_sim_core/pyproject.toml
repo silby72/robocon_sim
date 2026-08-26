@@ -13,12 +13,16 @@ dependencies = [
     "scipy>=1.11",
     "pyyaml>=6.0",
     "pillow>=10.0",
+    "ruamel.yaml>=0.18",   # comment-preserving YAML for the mechanism layer (config/robot/*, generated/*)
 ]
 
 [project.optional-dependencies]
 viz = ["matplotlib>=3.6"]
 viz-extra = ["matplotlib>=3.6", "seaborn>=0.12"]  # seaborn is optional styling
 test = ["pytest>=7.4"]
+# GUI is a *separate* concern (spec §1: gui->core one-way only). Kept out of the
+# default extras; install explicitly with `setup_env.py --extras gui`.
+gui = ["PySide6>=6.5", "ruamel.yaml>=0.18"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

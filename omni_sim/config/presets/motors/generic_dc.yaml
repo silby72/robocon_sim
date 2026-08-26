@@ -1,0 +1,10 @@
+# Generic small brushed DC gearmotor. A neutral starting point for custom builds.
+datasheet:
+  rated_voltage_v: 12.0
+  kv_rpm_per_v: 300.0
+  stall_torque_nm: 0.5
+  stall_current_a: 8.0
+  no_load_speed_rpm: 3600.0
+  no_load_current_a: 0.4
+  rotor_inertia_kgm2: 2.0e-6
+  encoder_cpr: 2048

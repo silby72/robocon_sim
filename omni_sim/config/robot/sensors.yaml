@@ -1,0 +1,20 @@
+schema_version: 1
+
+# SCHEMA ONLY -- not consumed yet. Sensor placement lands in Phase D; this file
+# documents the intended shape so it can be authored/reviewed early. base_link
+# frame, SI units (metres / radians).
+sensors:
+  imu:
+    - id: imu0
+      position_m: [0.0, 0.0, 0.10]     # x, y, z from base_link
+      orientation_rad: [0.0, 0.0, 0.0] # roll, pitch, yaw
+      rate_hz: 200.0
+
+  lidar:
+    - id: laser0
+      position_m: [0.15, 0.0, 0.20]
+      orientation_rad: [0.0, 0.0, 0.0]
+      rate_hz: 10.0
+
+  # wheel encoders are defined implicitly by each drive wheel's actuator
+  # (encoder_cpr in the motor datasheet); listed here only for completeness.

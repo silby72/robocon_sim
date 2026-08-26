@@ -102,7 +102,12 @@ def load_scenario(path: str | Path) -> Scenario:
     else:
         base_dir = path.parent
 
-    clock = ClockConfig(**_filter_kwargs(ClockConfig, raw.get("clock", {})))
+    clock_raw = dict(raw.get("clock", {}))
+    # control_rate_hz may be given at the scenario top level for convenience;
+    # it is a clock concern, so fold it in (an explicit clock.control_rate_hz wins).
+    if "control_rate_hz" in raw and "control_rate_hz" not in clock_raw:
+        clock_raw["control_rate_hz"] = raw["control_rate_hz"]
+    clock = ClockConfig(**_filter_kwargs(ClockConfig, clock_raw))
     ne = NominalErrorConfig(**_filter_kwargs(NominalErrorConfig,
                                              raw.get("nominal_error", {})))
 
@@ -127,13 +132,23 @@ def load_scenario(path: str | Path) -> Scenario:
     logging_cfg = LoggingConfig(**_filter_kwargs(LoggingConfig,
                                                  raw.get("logging", {})))
 
+    # Plant model paths. Preferred form is a `plant:` block pointing at either the
+    # generated files or hand-written ones; the legacy top-level plant_true /
+    # plant_nominal keys still work unchanged (backward compatible).
+    plant_block = raw.get("plant", {}) or {}
+    plant_true = plant_block.get("true_model",
+                                 raw.get("plant_true", "config/plant_true.yaml"))
+    plant_nominal = plant_block.get("nominal_model",
+                                    raw.get("plant_nominal",
+                                            "config/plant_nominal.yaml"))
+
     return Scenario(
         name=raw.get("name", "unnamed"),
         seed=int(raw.get("seed", 0)),
         duration_s=float(raw.get("duration_s", 10.0)),
         clock=clock,
-        plant_true=raw.get("plant_true", "config/plant_true.yaml"),
-        plant_nominal=raw.get("plant_nominal", "config/plant_nominal.yaml"),
+        plant_true=plant_true,
+        plant_nominal=plant_nominal,
         nominal_error=ne,
         controller=controller,
         disturbance=dist,

@@ -1,0 +1,16 @@
+# CubeMars AK70-10-like direct-drive-ish actuator (V3). Low KV, high torque.
+# Rotor inertia often unpublished -> left null so derive.py estimates it and
+# flags the result ESTIMATED (a deliberate, visible fallback).
+datasheet:
+  rated_voltage_v: 24.0
+  kv_rpm_per_v: 100.0
+  stall_torque_nm: 24.5
+  stall_current_a: 60.0
+  no_load_speed_rpm: 2400.0
+  no_load_current_a: 1.2
+  rotor_inertia_kgm2: null    # unknown -> estimated (WARNING + ESTIMATED tag)
+  encoder_cpr: 16384
+
+physical:
+  # A measured winding resistance, if you have it, overrides V/I_stall.
+  resistance_ohm: 0.10

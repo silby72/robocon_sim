@@ -1,0 +1,15 @@
+# DJI M3508 (P19 gearbox) driven by a C620 ESC.
+# Datasheet values are OUTPUT-shaft (after the internal 19.2:1 gearbox), modelled
+# with an ideal back-emf motor. DJI publishes a no-load output speed of about
+# 469-482 rpm at 24 V; KV = 20 rpm/V reproduces ~480 rpm and Kt = 0.477 Nm/A.
+datasheet:
+  rated_voltage_v: 24.0
+  kv_rpm_per_v: 20.0          # output shaft; -> no-load ~480 rpm
+  stall_torque_nm: 4.77       # ~ Kt * (I_stall - I_noload)
+  stall_current_a: 10.5
+  no_load_speed_rpm: 480.0
+  no_load_current_a: 0.5
+  rotor_inertia_kgm2: 1.0e-4  # output-referred; provided so J is not estimated
+  encoder_cpr: 8192
+
+# No measured 'physical:' block here -> constants come from the datasheet.

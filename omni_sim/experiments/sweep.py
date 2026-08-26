@@ -37,6 +37,7 @@ from omni_sim_core.simulator import MotorControlSim               # noqa: E402
 class Condition:
     tau_q: float
     j_ratio: float
+    control_rate_hz: float
 
 
 def _run_one(cond: Condition) -> dict:
@@ -48,7 +49,9 @@ def _run_one(cond: Condition) -> dict:
         true_params=true, nominal=nominal,
         pid_params=PIDParams(kp=0.02, ki=0.0),
         dob_params=DOBParams(enabled=True, tau_q=cond.tau_q, order=1),
-        clock_cfg=ClockConfig(1e-4, 1e-3, 2e-2),
+        # integrate at dt_sim; control (PID + DOB) runs at control_rate_hz (ZOH)
+        clock_cfg=ClockConfig(dt_sim=1e-4, dt_nav=2e-2,
+                              control_rate_hz=cond.control_rate_hz),
         seed=0, disturbances=load, duration_s=1.5,
         setpoint_fn=lambda t: 50.0,
     )
@@ -59,6 +62,7 @@ def _run_one(cond: Condition) -> dict:
     return {
         "tau_q": cond.tau_q,
         "j_ratio": cond.j_ratio,
+        "control_rate_hz": cond.control_rate_hz,
         "load_drop": abs(post - pre),
         "steady_error": abs(50.0 - post),
     }
@@ -70,13 +74,17 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--n-tau", type=int, default=10)
     ap.add_argument("--j-ratio", type=float, nargs=2, default=[0.25, 1.5])
     ap.add_argument("--n-j", type=int, default=5)
+    ap.add_argument("--control-rate", type=float, nargs="+", default=[1000.0],
+                    help="control loop rate(s) in Hz to sweep (DOB is rate-sensitive)")
     ap.add_argument("--out", default="results/sweep.csv")
     ap.add_argument("--jobs", type=int, default=0, help="0 => all cores")
     args = ap.parse_args(argv)
 
     tau_qs = np.linspace(args.tau_q[0], args.tau_q[1], args.n_tau)
     j_ratios = np.linspace(args.j_ratio[0], args.j_ratio[1], args.n_j)
-    conds = [Condition(tq, jr) for tq, jr in product(tau_qs, j_ratios)]
+    rates = args.control_rate
+    conds = [Condition(tq, jr, cr)
+             for tq, jr, cr in product(tau_qs, j_ratios, rates)]
 
     jobs = args.jobs or None
     with Pool(processes=jobs) as pool:

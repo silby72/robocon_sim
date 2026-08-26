@@ -85,13 +85,18 @@ def test_dhat_converges_to_disturbance(clean_true_params, clock_cfg):
 
 
 # 4 --------------------------------------------------------------------------
-def test_halving_dt_sim_is_invariant(clean_true_params, clock_cfg):
+def test_dt_sim_invariance_at_fixed_control_rate(clean_true_params):
+    # Spec section 5 reading of the original "dt_sim invariance": with the
+    # CONTROL RATE held fixed (control_rate_hz -> dt_motor), halving the
+    # integration step dt_sim must not change the result. Both runs use a
+    # 1 kHz control loop; only dt_sim differs.
     nominal = nominal_from_true(clean_true_params, 0.5, 1.0)
     dist = [DisturbanceSpec(target="motor_torque", index=0, waveform="step",
                             amplitude=0.2, start_s=0.3)]
-    coarse = _make_sim(clean_true_params, nominal, clock_cfg, dob_enabled=True,
+    coarse_cfg = ClockConfig(dt_sim=1.0e-4, dt_nav=2.0e-2, control_rate_hz=1000.0)
+    fine_cfg = ClockConfig(dt_sim=0.5e-4, dt_nav=2.0e-2, control_rate_hz=1000.0)
+    coarse = _make_sim(clean_true_params, nominal, coarse_cfg, dob_enabled=True,
                        disturbances=dist, duration=1.0).run()
-    fine_cfg = ClockConfig(dt_sim=0.5e-4, dt_motor=1.0e-3, dt_nav=2.0e-2)
     fine = _make_sim(clean_true_params, nominal, fine_cfg, dob_enabled=True,
                      disturbances=dist, duration=1.0).run()
     # compare on the shared coarse time grid

@@ -1,0 +1,11 @@
+# DJI M2006 (36:1 gearbox) driven by a C610 ESC. Output-shaft ideal model.
+# Published no-load output speed ~ 416 rpm at 24 V.
+datasheet:
+  rated_voltage_v: 24.0
+  kv_rpm_per_v: 17.3          # -> no-load ~415 rpm
+  stall_torque_nm: 1.0
+  stall_current_a: 3.0
+  no_load_speed_rpm: 415.0
+  no_load_current_a: 0.3
+  rotor_inertia_kgm2: 1.5e-5
+  encoder_cpr: 8192

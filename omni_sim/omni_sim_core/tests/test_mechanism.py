@@ -168,6 +168,38 @@ def test_backward_compatible_scenario():
     assert d_hat_final == pytest.approx(0.5, abs=0.02)
 
 
+# standalone odometry schema (optional, backward compatible) ----------------
+def test_odometry_schema_parses_and_validates():
+    from omni_sim_core.mechanism.schema import Chassis, SchemaError
+    from omni_sim_core.mechanism.yaml_rt import rt_loads
+    text = """
+schema_version: 1
+footprint: {shape: square, size_m: 0.5}
+center_of_mass: {position_m: [0.0, 0.0], mass_kg: 10.0, inertia_zz_kgm2: 0.3}
+drive_wheels:
+  - {id: fl, position_m: [0.2, 0.2], drive_axis_rad: 2.356, radius_m: 0.05, gear_ratio: 6.0, actuator_ref: a}
+  - {id: fr, position_m: [0.2, -0.2], drive_axis_rad: 0.785, radius_m: 0.05, gear_ratio: 6.0, actuator_ref: a}
+  - {id: rl, position_m: [-0.2, 0.2], drive_axis_rad: 3.927, radius_m: 0.05, gear_ratio: 6.0, actuator_ref: a}
+odometry:
+  - {id: odo_x, type: dead_wheel, position_m: [0.1, 0.0], measure_axis_rad: 0.0, radius_m: 0.029, encoder_cpr: 4096}
+  - {id: opt0, type: optical, position_m: [0.0, 0.0]}
+"""
+    chassis = Chassis.from_doc(rt_loads(text))
+    assert [o.id for o in chassis.odometry] == ["odo_x", "opt0"]
+    assert chassis.odometry[0].type == "dead_wheel"
+    # a dead_wheel without a radius is invalid
+    bad = rt_loads(text.replace("radius_m: 0.029, ", ""))
+    with pytest.raises(SchemaError):
+        Chassis.from_doc(bad)
+
+
+def test_chassis_without_odometry_still_valid():
+    # backward compatibility: the key is optional
+    from omni_sim_core.mechanism.schema import Chassis
+    chassis = Chassis.from_doc(rt_load(CONFIG / "robot" / "chassis.yaml"))
+    assert chassis.odometry == []
+
+
 # control-rate separation (spec section 5) -----------------------------------
 def test_control_rate_hz_sets_motor_period():
     from omni_sim_core.clock import ClockConfig, MultiRateClock

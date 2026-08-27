@@ -78,12 +78,42 @@ class DriveWheel:
             raise SchemaError(f"wheel '{self.id}': gear_ratio must be > 0")
 
 
+ODOMETRY_TYPES = ("dead_wheel", "optical")
+
+
+@dataclass
+class OdometrySource:
+    """A standalone odometry unit, separate from the drive-wheel encoders.
+
+    ``dead_wheel``: a passive (non-driven) measurement wheel rolling along
+    ``measure_axis_rad``; ``optical``: a 2D optical-flow / mouse sensor that
+    reports planar motion directly (no wheel, so radius/axis may be null).
+    """
+    id: str
+    type: str                                    # dead_wheel | optical
+    position_m: tuple[float, float]
+    measure_axis_rad: Optional[float] = None     # required for dead_wheel
+    radius_m: Optional[float] = None             # required for dead_wheel
+    encoder_cpr: Optional[int] = None
+
+    def validate(self) -> None:
+        if self.type not in ODOMETRY_TYPES:
+            raise SchemaError(f"odometry '{self.id}': type '{self.type}' invalid "
+                              f"(expected one of {ODOMETRY_TYPES})")
+        if self.type == "dead_wheel":
+            if self.radius_m is None or self.radius_m <= 0:
+                raise SchemaError(f"odometry '{self.id}': dead_wheel needs radius_m > 0")
+            if self.measure_axis_rad is None:
+                raise SchemaError(f"odometry '{self.id}': dead_wheel needs measure_axis_rad")
+
+
 @dataclass
 class Chassis:
     schema_version: int
     footprint: Footprint
     center_of_mass: CenterOfMass
     drive_wheels: list[DriveWheel]
+    odometry: list[OdometrySource] = field(default_factory=list)
 
     @staticmethod
     def from_doc(doc: Any) -> "Chassis":
@@ -114,9 +144,26 @@ class Chassis:
                 actuator_ref=str(_require(w, "actuator_ref", f"wheel '{wid}'")),
                 reverse=bool(w.get("reverse", False)),
             ))
+        # odometry is optional (standalone units, in addition to drive encoders)
+        odo: list[OdometrySource] = []
+        for o in (doc.get("odometry", []) or []):
+            oid = str(_require(o, "id", "odometry"))
+            odo.append(OdometrySource(
+                id=oid,
+                type=str(_require(o, "type", f"odometry '{oid}'")),
+                position_m=_xy(_require(o, "position_m", f"odometry '{oid}'"),
+                               f"odometry '{oid}'"),
+                measure_axis_rad=(None if o.get("measure_axis_rad", None) is None
+                                  else float(o["measure_axis_rad"])),
+                radius_m=(None if o.get("radius_m", None) is None
+                          else float(o["radius_m"])),
+                encoder_cpr=(None if o.get("encoder_cpr", None) is None
+                             else int(o["encoder_cpr"])),
+            ))
+
         chassis = Chassis(schema_version=int(doc["schema_version"]),
                           footprint=footprint, center_of_mass=com,
-                          drive_wheels=wheels)
+                          drive_wheels=wheels, odometry=odo)
         chassis.validate()
         return chassis
 
@@ -130,6 +177,11 @@ class Chassis:
             raise SchemaError("drive_wheels have duplicate ids")
         for w in self.drive_wheels:
             w.validate()
+        odo_ids = [o.id for o in self.odometry]
+        if len(odo_ids) != len(set(odo_ids)):
+            raise SchemaError("odometry sources have duplicate ids")
+        for o in self.odometry:
+            o.validate()
 
     def actuator_refs(self) -> list[str]:
         return [w.actuator_ref for w in self.drive_wheels]

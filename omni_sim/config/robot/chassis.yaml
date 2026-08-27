@@ -4,7 +4,7 @@ schema_version: 1
 # REP-103 frame: +x forward, +y left, +z up, CCW positive. SI units.
 footprint:
   shape: square            # only 'square' supported for now
-  size_m: 0.500            # side length
+  size_m: 0.9              # side length
 
 center_of_mass:
   position_m: [0.0, 0.0]   # offset from base_link origin (geometric centre)
@@ -13,28 +13,28 @@ center_of_mass:
 
 drive_wheels:
   - id: fl
-    position_m: [0.20, 0.20]   # ground-contact point
+    position_m: [0.44, -0.44]  # ground-contact point
     drive_axis_rad: 2.356      # 135 deg: tangential at the +x,+y corner
     radius_m: 0.0508           # 2 inch omni wheel
     gear_ratio: 6.0            # motor:wheel = 6:1  (REQUIRED, no implicit default)
     actuator_ref: m3508_fl
     reverse: false
   - id: fr
-    position_m: [0.20, -0.20]
+    position_m: [-0.45, -0.44]
     drive_axis_rad: 0.785      # 45 deg
     radius_m: 0.0508
     gear_ratio: 6.0
     actuator_ref: m3508_fr
     reverse: false
   - id: rl
-    position_m: [-0.20, 0.20]
+    position_m: [-0.45, 0.45]
     drive_axis_rad: 3.927      # 225 deg
     radius_m: 0.0508
     gear_ratio: 6.0
     actuator_ref: m3508_rl
     reverse: false
   - id: rr
-    position_m: [-0.20, -0.20]
+    position_m: [0.45, 0.45]
     drive_axis_rad: 5.498      # 315 deg
     radius_m: 0.0508
     gear_ratio: 6.0

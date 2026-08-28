@@ -66,6 +66,20 @@ def load_inputs(base_dir: str | Path) -> BuildInputs:
     )
 
 
+# datasheet fields an override may target (merged before deriving); anything
+# else in an actuator's overrides is a final MotorParams-level value.
+DATASHEET_OVERRIDE_KEYS = frozenset({
+    "rated_voltage_v", "kv_rpm_per_v", "stall_torque_nm", "stall_current_a",
+    "no_load_speed_rpm", "no_load_current_a", "rotor_inertia_kgm2", "encoder_cpr",
+})
+
+
+def _split_overrides(overrides: dict) -> tuple[dict, dict]:
+    ds = {k: v for k, v in overrides.items() if k in DATASHEET_OVERRIDE_KEYS}
+    param = {k: v for k, v in overrides.items() if k not in DATASHEET_OVERRIDE_KEYS}
+    return ds, param
+
+
 def _resolve_actuator(inp: BuildInputs, ref: str):
     """Return (datasheet, physical, overrides) for an actuator reference."""
     if ref not in inp.actuators.actuators:
@@ -83,10 +97,19 @@ def _resolve_actuator(inp: BuildInputs, ref: str):
 
 def derive_reference_motor(inp: BuildInputs) -> tuple[DerivedMotor, dict, "object"]:
     """Derive the representative drive motor (first wheel) and its overrides."""
+    from dataclasses import replace
     from .schema import Physical
     wheel = inp.chassis.drive_wheels[0]
     datasheet, physical, overrides = _resolve_actuator(inp, wheel.actuator_ref)
     physical = physical or Physical()
+
+    # Overrides are a flat dict; keys that name datasheet fields are merged BEFORE
+    # deriving (so e.g. a corrected KV re-derives Kt), the rest are applied to the
+    # final MotorParams AFTER deriving (e.g. a measured inertia_kgm2 for unit
+    # variation). This matches both the section 4.2 example and section 6.3.
+    ds_over, param_over = _split_overrides(dict(overrides))
+    if ds_over:
+        datasheet = replace(datasheet, **ds_over)
 
     n_wheels = len(inp.chassis.drive_wheels)
     mass_share = inp.chassis.center_of_mass.mass_kg / n_wheels
@@ -97,7 +120,7 @@ def derive_reference_motor(inp: BuildInputs) -> tuple[DerivedMotor, dict, "objec
     derived = derive_motor(datasheet, physical,
                            gear_ratio=wheel.gear_ratio,
                            load_inertia_wheel_side_kgm2=load_inertia)
-    return derived, dict(overrides), wheel
+    return derived, param_over, wheel
 
 
 def _motor_params_map(inp: BuildInputs) -> CommentedMap:

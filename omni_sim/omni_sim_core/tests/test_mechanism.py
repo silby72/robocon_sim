@@ -200,6 +200,29 @@ def test_chassis_without_odometry_still_valid():
     assert chassis.odometry == []
 
 
+# override routing: datasheet keys re-derive, param keys apply post-derive -----
+def test_datasheet_override_rederives_param_override_applies(tmp_path):
+    import math
+    import shutil
+    from omni_sim_core.mechanism.build import build
+    from omni_sim_core.mechanism.yaml_rt import rt_load, rt_dump
+
+    shutil.copytree(CONFIG, tmp_path / "config")
+    act_path = tmp_path / "config" / "robot" / "actuators.yaml"
+    doc = rt_load(act_path)
+    ov = doc["actuators"]["m3508_fl"]["overrides"]
+    ov["kv_rpm_per_v"] = 40.0          # datasheet key -> re-derive Kt
+    # inertia_kgm2 override (param key) is already present in the file
+    rt_dump(doc, act_path)
+
+    res = build(tmp_path)
+    true = rt_load(res.plant_true)
+    # Kt must follow the overridden KV (not the preset's 20 rpm/V)
+    assert float(true["torque_constant_nm_a"]) == pytest.approx(60 / (2 * math.pi * 40), rel=1e-6)
+    # the param-level inertia override is still applied verbatim
+    assert float(true["inertia_kgm2"]) == pytest.approx(5.2e-4)
+
+
 # control-rate separation (spec section 5) -----------------------------------
 def test_control_rate_hz_sets_motor_period():
     from omni_sim_core.clock import ClockConfig, MultiRateClock

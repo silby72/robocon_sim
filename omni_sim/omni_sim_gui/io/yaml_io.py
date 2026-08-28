@@ -46,6 +46,19 @@ def loads_doc(text: str):
     return rt_loads(text)
 
 
+def load_actuators_doc(path: str | Path):
+    """Load actuators.yaml as a ruamel document (comments/order preserved)."""
+    return rt_load(path)
+
+
+def new_actuator(preset: str | None) -> CommentedMap:
+    """A fresh actuator entry: a preset reference with an empty override map."""
+    m = CommentedMap()
+    m["preset"] = preset
+    m["overrides"] = CommentedMap()
+    return m
+
+
 def load_actuator_names(path: str | Path) -> list[str]:
     """Return the actuator ids defined in actuators.yaml (for the ref dropdown).
 

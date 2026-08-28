@@ -16,18 +16,22 @@ from pathlib import Path
 
 from .qt import QtWidgets, BINDING
 from .pages.chassis_page import ChassisPage
+from .pages.actuator_page import ActuatorPage
 
 
-def build_window(config_dir: Path) -> QtWidgets.QMainWindow:
+def build_window(config_dir: Path, start_tab: str = "chassis") -> QtWidgets.QMainWindow:
     win = QtWidgets.QMainWindow()
     win.setWindowTitle(f"omni_sim config editor  ·  Qt binding: {BINDING}")
     tabs = QtWidgets.QTabWidget()
+    order = ["chassis", "actuators", "sensors"]
     tabs.addTab(ChassisPage(config_dir / "chassis.yaml"), "Chassis")
-    # placeholder tabs for the pages still to come (Phase C / D)
-    for name in ("Actuators", "Sensors"):
-        ph = QtWidgets.QLabel(f"  {name} page — coming next")
-        ph.setAlignment(_align_center())
-        tabs.addTab(ph, name)
+    tabs.addTab(ActuatorPage(config_dir), "Actuators")
+    # placeholder tab for the sensors page (Phase D)
+    ph = QtWidgets.QLabel("  Sensors page — coming next")
+    ph.setAlignment(_align_center())
+    tabs.addTab(ph, "Sensors")
+    if start_tab in order:
+        tabs.setCurrentIndex(order.index(start_tab))
     win.setCentralWidget(tabs)
     win.resize(1100, 720)
     return win
@@ -42,11 +46,14 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="omni_sim config editor")
     ap.add_argument("--config-dir", default="config/robot",
                     help="directory holding chassis.yaml etc.")
+    ap.add_argument("--tab", default="chassis",
+                    choices=["chassis", "actuators", "sensors"],
+                    help="which tab to open on")
     args = ap.parse_args(argv)
 
     app = QtWidgets.QApplication(sys.argv[:1])
     app.setStyle("Fusion")
-    win = build_window(Path(args.config_dir).resolve())
+    win = build_window(Path(args.config_dir).resolve(), start_tab=args.tab)
     win.show()
     return app.exec()
 

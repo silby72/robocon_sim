@@ -97,3 +97,27 @@
 
 ---
 （このファイルは議論用のスナップショット。実装が進んだら更新する）
+
+---
+
+## 実装状況更新 (2026-09-13): P1–P4 完成
+
+依頼「経路計画・フィールド・評価・スイープ」を実装。全て core（rclpy/PySide6 非依存・ヘッドレス・決定論）。
+テスト計 74 passing（既存30 + planning20 + field10 + evaluation7 + sweep7）。
+
+- **P1 経路計画** `omni_sim_core/planning/`（cost_field / grid_planner A* / shortcut / corner / orientation）
+  受け入れ基準12項目 pass。最難 240×240 で計画 中央値470ms（<1s）。プロセス跨ぎでビット一致。
+  ★DECISIONS §2.4 の `binary_fill_holes` は縁壁アリーナを全 lethal 化するため却下 → 「囲まれ かつ 小 pocket のみ封鎖」
+  （`PlanConfig.seal_area_frac`, 既定0.05）をユーザ承認の上で採用。
+- **P2 フィールド** `omni_sim_core/field/` + `config/field/robocon2027.yaml` + `experiments/gen_field.py`
+  高さ注釈2Dプリミティブ→スライス。loc=表面/unknown・nav=塗り/lethal。受け入れ6項目 pass。
+- **P3 評価** `omni_sim_core/evaluation/`（真の幾何に対する解析的フットプリント最小距離、外接円計画/実形状判定の非対称）。
+  受け入れ4項目 pass。`results/<ts>/` に summary/csv/png。
+- **P4 スイープ** `omni_sim_core/sweep/`（直積展開・multiprocessing・条件毎に (seed,index) 由来 RNG・tidy CSV・
+  失敗継続・`find_boundary`＋二分探索）。受け入れ5項目 pass（並列数1/4/8で一致）。
+  実験3本（`experiments/sweep_{footprint,unknown_sensitivity,narrow_gap}.py`）:
+  - ① 1.2m 隘路を通れる最大機体幅の境界 = **0.848 m**（外接円計画が律速）
+  - ② l1_barrier_h 感度: 自己位置特徴が立つ閾値 = **0.185 m**（= LiDAR面 600+185）
+  - ③ 隘路斜め通過 単層 vs 2層: 単層 0/17 が余裕0.15m未達（中央値0.033m, 経由点要）／2層 17/17 達成（中央値0.325m）
+
+P5（オドメトリ誤差モデル）は次回。

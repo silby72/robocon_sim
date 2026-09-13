@@ -1,0 +1,12 @@
+# 依頼 §5.3① — the maximum robot width that clears the L1 corridor pinch.
+# A direct requirement number for the mechanism team.
+name: footprint_width_boundary
+parallel: 4
+seed: 42
+
+parameters:
+  footprint_width: {range: [0.40, 1.00], step: 0.02}   # 31 points
+  planner:         {values: [astar, astar_shortcut]}   # 2 points
+# = 62 conditions
+
+metrics: [success, min_clearance, path_length, expanded_nodes, plan_time_s]

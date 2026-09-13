@@ -1,0 +1,80 @@
+# =============================================================================
+# ABU Robocon 2027 Solo, Indonesia -- height-annotated field spec (依頼 §3.2).
+#
+# One definition, two consumers: the slicer turns this into occupancy grids
+# (planning), the evaluator keeps the primitives as exact geometry (collision).
+#
+# Units: mm. Frame: origin (0,0) = SOUTH-WEST corner, +x east, +y north, +z up.
+# Everything is converted to SI (metres) on load; only display is mm.
+#
+# Provenance of every dimension (依頼 §3.2):
+#   [R] stated in the rulebook text      -> trust it
+#   [F] scaled off Figure 2 / Figure 3   -> estimate, replace when CAD lands
+#   [A] no number in the rulebook at all  -> assumption, and usually a sweep target
+# =============================================================================
+
+units: mm
+resolution: 20            # [A] mm/cell for the generated grids (matches maps/)
+
+field:
+  size: [11000, 11000]    # [R] 11000 x 11000 mm
+  origin: [0, 0]          # SW corner in world coords
+
+# floor_z = height of each driving surface; extent = its drivable footprint
+# (outside the extent is a fall -> lethal in the nav grid); holes = drops
+# punched through the slab.
+layers:
+  ground:
+    floor_z: 0            # [R] ground level
+  l1:
+    floor_z: 600          # [R] Level 1 is 600 mm above ground
+    extent: [[2500, 2500], [8500, 8500]]     # [R] 6000 x 6000 slab, [F] centred
+    holes:
+      - [5000, 7500, 6000, 8500]             # [R] 1000 x 1000 Mustika pocket, [F] pos
+  l2:
+    floor_z: 900          # [R] Level 2 is 300 mm above L1
+    extent: [[4000, 4000], [7000, 7000]]     # [R] 3000 x 3000 slab, [F] centred
+
+lidar_height: 185         # [A] LiDAR optical centre above each layer floor
+robot_band: [20, 250]     # [A] height band the chassis sweeps (floor-relative)
+
+geometry:
+  # --- field boundary --------------------------------------------------------
+  - {name: boundary, type: outline, center: [5500, 5500], size: [11000, 11000],
+     thickness: 50, z: [0, "boundary_h"]}          # [A] barrier height -> sweep
+
+  # --- raised platforms (solid slabs) ----------------------------------------
+  # The L1 slab is a 600 mm wall seen from the ground; the L2 slab a 900 mm wall
+  # seen from ground and L1. The band mechanism (§3.3) excludes a slab from its
+  # OWN layer automatically -- its top is below that layer's robot band.
+  - {name: l1_platform, type: box, center: [5500, 5500], size: [6000, 6000],
+     z: [0, 600]}                                   # [R] 6000 sq, 600 tall
+  - {name: l2_platform, type: box, center: [5500, 5500], size: [3000, 3000],
+     z: [0, 900]}                                   # [R] 3000 sq, 900 tall
+
+  # --- pillars ---------------------------------------------------------------
+  - {name: mustika_pillar, type: cylinder, center: [5500, 8000], diameter: 270,
+     z: [0, 500]}                                   # [R] d270 h500 on ground
+  - {name: central_pillar, type: cylinder, center: [5500, 5500], diameter: 270,
+     z: [900, 1700]}                                # [R] d270 h800 on L2
+
+  # --- L1 perimeter anti-fall barrier ---------------------------------------
+  # Height is not given in the rulebook -> swept. Its top crosses the L1 LiDAR
+  # plane (600 + 185 = 785 mm) exactly when l1_barrier_h > 185 (acceptance #4).
+  - {name: l1_barrier, type: outline, center: [5500, 5500], size: [6000, 6000],
+     thickness: 50, z: [600, "600 + l1_barrier_h"]}   # [R] exists, [A] height
+
+  # --- centre divider (fence along the centre line) --------------------------
+  # [R] "a fence along the centre line of the Ground Area and Level 1"; [F] gaps.
+  - {name: divider_g1, type: segment, seg: [5500, 0, 5500, 1000],
+     thickness: 30, z: [0, "center_divider_h"]}       # [A] 30 mm thin wall
+  - {name: divider_g2, type: segment, seg: [5500, 2200, 5500, 2500],
+     thickness: 30, z: [0, "center_divider_h"]}
+  - {name: divider_l1, type: segment, seg: [5500, 2500, 5500, 3000],
+     thickness: 30, z: [600, "600 + center_divider_h"]}
+
+# Numbers the rulebook does not fix -> swept (依頼 §5). Values in mm.
+unknowns:
+  l1_barrier_h:     {default: 100, range: [50, 400], step: 25}
+  center_divider_h: {default: 100, range: [50, 400], step: 25}
+  boundary_h:       {default: 50,  range: [30, 300], step: 25}

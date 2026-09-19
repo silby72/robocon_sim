@@ -20,6 +20,8 @@ from .grid_planner import GridPlanner, plan
 from .shortcut import line_of_sight, shortcut_path
 from .corner import corner_radii, corner_speed_limits
 from .orientation import build_orientation_profile
+from .smooth import (SmoothPath, smooth_path, max_deviation,
+                     speed_limit_from_curvature)
 
 __all__ = [
     "Path",
@@ -34,4 +36,8 @@ __all__ = [
     "corner_radii",
     "corner_speed_limits",
     "build_orientation_profile",
+    "SmoothPath",
+    "smooth_path",
+    "max_deviation",
+    "speed_limit_from_curvature",
 ]

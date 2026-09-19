@@ -14,11 +14,16 @@ def generate_launch_description() -> LaunchDescription:
     rviz_cfg = os.path.join(pkg, "rviz", "omni_sim.rviz")
 
     map_yaml = LaunchConfiguration("map_yaml")
+    chassis_yaml = LaunchConfiguration("chassis_yaml")
     rtf = LaunchConfiguration("real_time_factor")
     use_rviz = LaunchConfiguration("rviz")
 
     return LaunchDescription([
         DeclareLaunchArgument("map_yaml", default_value=""),
+        # Empty is fine: sim_node falls back to <repo>/config/robot/chassis.yaml
+        # next to the map. Pass this only to run a different chassis.
+        DeclareLaunchArgument("chassis_yaml", default_value="",
+                              description="config/robot/chassis.yaml; the footprint collision is judged with"),
         DeclareLaunchArgument("real_time_factor", default_value="1.0"),
         DeclareLaunchArgument("rviz", default_value="true"),
         Node(
@@ -26,9 +31,15 @@ def generate_launch_description() -> LaunchDescription:
             executable="sim_node",
             name="omni_sim",
             output="screen",
+            # sim_node is the /clock *source* -- it must NOT set use_sim_time
+            # on itself. That parameter makes rclpy's create_timer() wait on
+            # /clock before firing, and the only thing that will ever publish
+            # /clock is the timer callback it's now waiting on: a permanent,
+            # silent deadlock (looks exactly like a hang; no error, 0% CPU).
+            # Consumers (RViz2 below) still need use_sim_time to sync to it.
             parameters=[{
-                "use_sim_time": True,
                 "map_yaml": map_yaml,
+                "chassis_yaml": chassis_yaml,
                 "real_time_factor": rtf,
             }],
         ),

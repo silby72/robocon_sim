@@ -1,0 +1,28 @@
+[0.997s] Invoking command in '/home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PS1=(.venv) PYTHONPATH=/home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/lib/python3.12/site-packages:${PYTHONPATH} VIRTUAL_ENV_PROMPT=(.venv) /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros/build --no-deps symlink_data
+[1.268s] running develop
+[1.401s] running egg_info
+[1.401s] creating omni_sim_ros.egg-info
+[1.413s] writing omni_sim_ros.egg-info/PKG-INFO
+[1.414s] writing dependency_links to omni_sim_ros.egg-info/dependency_links.txt
+[1.414s] writing entry points to omni_sim_ros.egg-info/entry_points.txt
+[1.414s] writing requirements to omni_sim_ros.egg-info/requires.txt
+[1.414s] writing top-level names to omni_sim_ros.egg-info/top_level.txt
+[1.414s] writing manifest file 'omni_sim_ros.egg-info/SOURCES.txt'
+[1.438s] reading manifest file 'omni_sim_ros.egg-info/SOURCES.txt'
+[1.438s] writing manifest file 'omni_sim_ros.egg-info/SOURCES.txt'
+[1.452s] running build_ext
+[1.452s] Creating /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/lib/python3.12/site-packages/omni-sim-ros.egg-link (link to .)
+[1.452s] Installing sim_node script to /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/bin
+[1.453s] 
+[1.453s] Installed /home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros
+[1.453s] running symlink_data
+[1.453s] creating /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/share/ament_index
+[1.453s] creating /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/share/ament_index/resource_index
+[1.453s] creating /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/share/ament_index/resource_index/packages
+[1.453s] symbolically linking /home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros/resource/omni_sim_ros -> /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/share/ament_index/resource_index/packages
+[1.453s] symbolically linking /home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros/package.xml -> /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/share/omni_sim_ros
+[1.453s] creating /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/share/omni_sim_ros/launch
+[1.453s] symbolically linking /home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros/launch/sim.launch.py -> /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/share/omni_sim_ros/launch
+[1.453s] creating /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/share/omni_sim_ros/rviz
+[1.453s] symbolically linking /home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros/rviz/omni_sim.rviz -> /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/share/omni_sim_ros/rviz
+[1.485s] Invoked command in '/home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros' returned '0': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PS1=(.venv) PYTHONPATH=/home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/lib/python3.12/site-packages:${PYTHONPATH} VIRTUAL_ENV_PROMPT=(.venv) /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros/build --no-deps symlink_data

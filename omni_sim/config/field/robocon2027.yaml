@@ -73,6 +73,29 @@ geometry:
   - {name: divider_l1, type: segment, seg: [5500, 2500, 5500, 3000],
      thickness: 30, z: [600, "600 + center_divider_h"]}
 
+# Ramps: the drivable joins between layers (see spec.ConnectorSpec).
+# Without these the ground and L1 grids are disconnected -- the L1 slab is a
+# 600 mm wall from below and "off the slab is a fall" from above -- so no
+# ground->L1 plan can exist and the transition can only be faked.
+#
+# Each rect is carved FREE on BOTH layers it links, so the planner has one
+# connected corridor and the gate mechanism (ui/leveled_field_2027) owns the
+# genuinely ambiguous middle of the slope, where the robot is on neither floor.
+#
+# The x1 values overshoot the slab edge (2500 / 8500) by 25 mm on purpose: that
+# is half the l1_barrier's 50 mm thickness, so the carve punches a doorway
+# through the barrier instead of leaving the ramp walled off at its top.
+#
+# CAUTION [F]: matching field_layout_2027.RAMP_RECT_MM, this is 1000 mm of run
+# for 600 mm of rise -- a 31 deg slope, far too steep to actually drive. Either
+# the run or the rise is wrong in the figure this was scaled from; the topology
+# (climb in +x, 3500 mm wide in y) is what every consumer assumes. Replace with
+# the real dimensions when CAD lands -- the shallow-ramp case needs the run
+# extended westward, not the width changed.
+connectors:
+  - {name: ramp_red,  rect: [1500, 3000, 2525, 6500], links: [ground, l1]}
+  - {name: ramp_blue, rect: [8475, 3000, 9500, 6500], links: [ground, l1]}
+
 # Numbers the rulebook does not fix -> swept (依頼 §5). Values in mm.
 unknowns:
   l1_barrier_h:     {default: 100, range: [50, 400], step: 25}

@@ -1,0 +1,1 @@
+/home/ubuntu/robocon_sim/ros2_ws/src/omni_sim_ros/setup.py

@@ -67,4 +67,13 @@ def slice_nav(spec: FieldSpec, prims: list[Primitive],
     for p in prims:
         if p.overlaps_band(lo, hi):
             raster[p.filled_mask(X, Y)] = OCC
+
+    # Connectors (ramps) carve LAST, on purpose: a ramp's whole job is to be
+    # drivable where the layer model says "fall" (off the slab) or "wall" (the
+    # perimeter barrier at the ramp top). Carving before the loops above would
+    # let the barrier close the doorway again and leave the layers disconnected.
+    for c in spec.connectors:
+        if layer.name in c.links:
+            cx0, cy0, cx1, cy1 = c.rect
+            raster[(X >= cx0) & (X <= cx1) & (Y >= cy0) & (Y <= cy1)] = FREE
     return raster

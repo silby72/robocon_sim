@@ -1,0 +1,15 @@
+source;share/omni_sim_ros/hook/path.ps1
+source;share/omni_sim_ros/hook/path.dsv
+source;share/omni_sim_ros/hook/path.sh
+source;share/omni_sim_ros/hook/pythonpath.ps1
+source;share/omni_sim_ros/hook/pythonpath.dsv
+source;share/omni_sim_ros/hook/pythonpath.sh
+source;share/omni_sim_ros/hook/pythonscriptspath.ps1
+source;share/omni_sim_ros/hook/pythonscriptspath.dsv
+source;share/omni_sim_ros/hook/pythonscriptspath.sh
+source;share/omni_sim_ros/hook/ament_prefix_path.ps1
+source;share/omni_sim_ros/hook/ament_prefix_path.dsv
+source;share/omni_sim_ros/hook/ament_prefix_path.sh
+source;../../build/omni_sim_ros/share/omni_sim_ros/hook/pythonpath_develop.ps1
+source;../../build/omni_sim_ros/share/omni_sim_ros/hook/pythonpath_develop.dsv
+source;../../build/omni_sim_ros/share/omni_sim_ros/hook/pythonpath_develop.sh

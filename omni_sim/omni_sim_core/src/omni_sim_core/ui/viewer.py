@@ -43,6 +43,26 @@ class ViewerConfig:
     trail_len: int = 400          # points kept in the travelled-path trail
     lidar_stride: int = 2         # plot every Nth beam (thin the cloud)
     interval_ms: int = 50         # animation frame period (wall clock)
+    chassis_yaml: str | None = None  # config/robot/chassis.yaml; None -> plain dot marker
+
+
+def _load_chassis_geometry(chassis_yaml: str):
+    """Body-frame footprint polygon + drive-wheel positions from chassis.yaml.
+
+    Imports the mechanism layer lazily so viewing a run never requires ruamel
+    unless a chassis file is actually given (mechanism/* is the only part of
+    the core that depends on it).
+    """
+    from ..mechanism.yaml_rt import rt_load
+    from ..mechanism.schema import Chassis
+
+    chassis = Chassis.from_doc(rt_load(chassis_yaml))
+    half = chassis.footprint.size_m / 2.0
+    footprint = np.array([[half, half], [-half, half],
+                          [-half, -half], [half, -half], [half, half]])
+    wheels = [(w.position_m[0], w.position_m[1], w.radius_m)
+             for w in chassis.drive_wheels]
+    return footprint, wheels
 
 
 class RealtimeViewer:
@@ -56,12 +76,15 @@ class RealtimeViewer:
     config : ViewerConfig
     """
 
-    def __init__(self, sim, follower, lidar, config: ViewerConfig | None = None):
+    def __init__(self, sim, follower, lidar, config: ViewerConfig | None = None,
+                 leveled_field=None):
         self.sim = sim
         self.follower = follower
         self.lidar = lidar
         self.grid = lidar.grid
         self.cfg = config or ViewerConfig()
+        self.leveled_field = leveled_field  # LeveledField | None -> ground/L1/L2
+        self._cur_level = "ground"  # persistent: only changes through a ramp/stairs gate
 
         self._path_x: list[float] = []
         self._path_y: list[float] = []
@@ -70,6 +93,12 @@ class RealtimeViewer:
         self._steps_per_frame = max(
             1, int(round(self.cfg.interval_ms * 1e-3 / sim.clock.config.dt_sim)))
         self._torque = np.zeros(sim.jac.n_wheels)
+
+        self._footprint_body = None
+        self._wheels_body = []
+        if self.cfg.chassis_yaml:
+            self._footprint_body, self._wheels_body = \
+                _load_chassis_geometry(self.cfg.chassis_yaml)
 
     # -- one animation frame: advance the sim, refresh artists ------------
     def _extent(self):
@@ -90,10 +119,16 @@ class RealtimeViewer:
         for ax in (ax_map, ax_err, ax_info):
             ax.set_facecolor(_PANEL)
 
-        # occupancy background
-        ax_map.imshow(self.grid.grid, origin="lower", extent=self._extent(),
-                      cmap="Greys", vmin=0, vmax=100, alpha=0.9, zorder=0)
-        ax_map.set_title("omni_sim  ·  live view", color=_TITLE)
+        # occupancy background: the real ABU Robocon 2027 field (colored zones,
+        # auto-detected by size) or a plain grayscale grid for any other map.
+        ext = self._extent()
+        if abs((ext[1] - ext[0]) - 11.0) < 0.5 and abs((ext[3] - ext[2]) - 11.0) < 0.5:
+            from .field_layout_2027 import draw_field_2027
+            draw_field_2027(ax_map)
+        else:
+            ax_map.imshow(self.grid.grid, origin="lower", extent=ext,
+                          cmap="Greys", vmin=0, vmax=100, alpha=0.9, zorder=0)
+        ax_map.set_title("omni_sim  ·  live view", color=_TITLE, pad=28)
         ax_map.set_xlabel("x [m]", color=_TEXT)
         ax_map.set_ylabel("y [m]", color=_TEXT)
         ax_map.set_aspect("equal")
@@ -107,11 +142,28 @@ class RealtimeViewer:
         (self._trail,) = ax_map.plot([], [], "-", color=_ACCENT, lw=2.0,
                                      label="path", zorder=2)
         self._scan = ax_map.scatter([], [], s=6, c=_WARN, label="LiDAR", zorder=3)
-        (self._robot,) = ax_map.plot([], [], "o", color=_GOOD, ms=12, zorder=4)
+
+        if self._footprint_body is not None:
+            from matplotlib.patches import Polygon, Circle
+            self._robot = None
+            self._body_patch = Polygon(self._footprint_body, closed=True,
+                                       facecolor=_GOOD, edgecolor=_TEXT,
+                                       alpha=0.55, lw=1.2, zorder=4)
+            ax_map.add_patch(self._body_patch)
+            self._wheel_patches = [
+                ax_map.add_patch(Circle((wx, wy), radius=r, facecolor=_BG,
+                                        edgecolor=_ACCENT, lw=1.2, zorder=5))
+                for wx, wy, r in self._wheels_body]
+        else:
+            self._body_patch = None
+            self._wheel_patches = []
+            (self._robot,) = ax_map.plot([], [], "o", color=_GOOD, ms=12, zorder=4)
+
         self._heading = ax_map.annotate("", xytext=(0, 0), xy=(0, 0),
                                         arrowprops=dict(arrowstyle="->", color=_GOOD,
-                                                        lw=2), zorder=5)
-        ax_map.legend(loc="upper right", framealpha=0.3, fontsize=9)
+                                                        lw=2), zorder=6)
+        ax_map.legend(loc="lower center", bbox_to_anchor=(0.5, 1.02), ncol=3,
+                     framealpha=0.3, fontsize=9)
 
         ax_err.set_title("tracking error", color=_ACCENT)
         ax_err.set_ylabel("|e| [m]", color=_TEXT)
@@ -128,10 +180,27 @@ class RealtimeViewer:
         self.ax_map = ax_map
         return fig
 
+    def _level(self) -> str:
+        return self._cur_level
+
+    def _active_lidar(self, level: str):
+        if self.leveled_field is None:
+            return self.lidar
+        return self.leveled_field.lidars[level]
+
+    def _footprint_world(self, pose) -> np.ndarray:
+        """Footprint corners (Nx2) at ``pose``, or just the centre point if no
+        chassis geometry was loaded."""
+        if self._footprint_body is None:
+            return pose[:2].reshape(1, 2)
+        c, s = np.cos(pose[2]), np.sin(pose[2])
+        rot = np.array([[c, -s], [s, c]])
+        return self._footprint_body @ rot.T + pose[:2]
+
     def _lidar_world_points(self):
-        p = self.lidar._sensor_pose(self.sim.body.pose)
-        scan = self.lidar._measure(self.sim.clock.t,
-                                   {"pose": self.sim.body.pose})
+        lidar = self._active_lidar(self._level())
+        p = lidar._sensor_pose(self.sim.body.pose)
+        scan = lidar._measure(self.sim.clock.t, {"pose": self.sim.body.pose})
         r = scan.ranges[::self.cfg.lidar_stride]
         a = scan.angles[::self.cfg.lidar_stride] + p[2]
         finite = np.isfinite(r)
@@ -147,7 +216,26 @@ class RealtimeViewer:
             if self.sim.clock.nav_fires():
                 cmd_vel = self.follower.command(self.sim.clock.t, self.sim.body.pose)
                 torque = self.sim._wheel_torque_from_cmd_vel(cmd_vel, kp=1.5)
+            prev_xy = self.sim.body.state[:2].copy()
             self.sim.step(torque)
+            if self.leveled_field is not None:
+                pose = self.sim.body.pose
+                # The level only changes while inside a Ramp (ground<->L1) or
+                # Stairs (L1<->L2) gate -- everywhere else it's a hard wall,
+                # so this can't "climb" L1 from an arbitrary edge.
+                new_level, collision_levels = self.leveled_field.resolve_level(
+                    self._cur_level, pose[0], pose[1])
+                footprint = self._footprint_world(pose)
+                if self.leveled_field.is_blocked(collision_levels, footprint):
+                    self._collision_count = getattr(self, "_collision_count", 0) + 1
+                    # Hit a wall, the field boundary, an upper-level edge, or
+                    # the opponent's territory: undo this step's translation
+                    # and kill the twist so the torque that drove it into the
+                    # wall doesn't just convert into a spin instead.
+                    self.sim.body.state[:2] = prev_xy
+                    self.sim.body.state[3:6] = 0.0
+                else:
+                    self._cur_level = new_level
             self.sim.update_odometry()
         self._torque = torque
 
@@ -165,7 +253,14 @@ class RealtimeViewer:
         pts = self._lidar_world_points()
         self._scan.set_offsets(pts if pts.size else np.empty((0, 2)))
 
-        self._robot.set_data([pose[0]], [pose[1]])
+        c, s = np.cos(pose[2]), np.sin(pose[2])
+        if self._body_patch is not None:
+            self._body_patch.set_xy(self._footprint_world(pose))
+            for patch, (wx, wy, _r) in zip(self._wheel_patches, self._wheels_body):
+                patch.center = (pose[0] + c * wx - s * wy,
+                                pose[1] + s * wx + c * wy)
+        else:
+            self._robot.set_data([pose[0]], [pose[1]])
         hx, hy = 0.35 * np.cos(pose[2]), 0.35 * np.sin(pose[2])
         self._heading.set_position((pose[0], pose[1]))
         self._heading.xy = (pose[0] + hx, pose[1] + hy)
@@ -176,13 +271,17 @@ class RealtimeViewer:
         self._ax_err.relim(); self._ax_err.autoscale_view()
 
         drift = float(np.linalg.norm(pose[:2] - self.sim.odom_pose[:2]))
-        self._info.set_text(
-            f"t      {self.sim.clock.t:6.2f} s\n"
-            f"pose   {pose[0]:5.2f}, {pose[1]:5.2f}\n"
-            f"theta  {pose[2]:+5.2f} rad\n"
-            f"track  {err:5.3f} m\n"
-            f"odom   {drift:5.3f} m")
-        return (self._trail, self._scan, self._robot, self._err_line, self._info)
+        info = (f"t      {self.sim.clock.t:6.2f} s\n"
+               f"pose   {pose[0]:5.2f}, {pose[1]:5.2f}\n"
+               f"theta  {pose[2]:+5.2f} rad\n"
+               f"track  {err:5.3f} m\n"
+               f"odom   {drift:5.3f} m")
+        if self.leveled_field is not None:
+            info += f"\nlevel  {self._level()}"
+        self._info.set_text(info)
+        robot_artists = (self._body_patch, *self._wheel_patches) \
+            if self._body_patch is not None else (self._robot,)
+        return (self._trail, self._scan, *robot_artists, self._err_line, self._info)
 
     def _n_frames(self) -> int:
         frame_dt = self._steps_per_frame * self.sim.clock.config.dt_sim

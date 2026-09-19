@@ -118,6 +118,111 @@ class Trajectory:
         return self._samples[idx]
 
 
+@dataclass
+class ProfileLimits:
+    """Limits for :class:`SampledTrajectory` (SI units)."""
+    v_max: float = 1.2
+    a_max: float = 1.5        # tangential accel/decel [m/s^2]
+    a_lat_max: float = 2.0    # lateral (cornering) accel [m/s^2]
+
+
+class SampledTrajectory:
+    """Time-parameterised motion along a densely sampled geometric path.
+
+    :class:`Trajectory` times each polyline leg with its own trapezoid, so it
+    comes to a **full stop at every waypoint** and its heading jumps by the
+    turn angle at each vertex. This class instead takes an already-smooth,
+    arc-length-sampled path (see ``planning.smooth.smooth_path``) and fits one
+    continuous speed profile over the whole thing, stopping only at the ends.
+
+    The profile is the standard forward-backward pass over arc length:
+
+        v_limit = min(v_max, sqrt(a_lat_max / curvature))     per sample
+        forward   v[i]   <= sqrt(v[i-1]^2 + 2 a_max ds)       can we speed up?
+        backward  v[i]   <= sqrt(v[i+1]^2 + 2 a_max ds)       must we slow down?
+
+    which is the continuous form of what ``planning.corner`` can only do at
+    vertices. Heading is **not** taken from the path tangent: the robot is
+    holonomic (§2.6), so ``theta`` comes from an independent
+    ``OrientationProfile`` -- or stays fixed if none is given. Tying heading to
+    the tangent is what makes a chassis spin on the spot at every corner.
+
+    Exposes ``sample(t)`` / ``duration`` so it drops into
+    :class:`TrajectoryFollower` wherever :class:`Trajectory` fits.
+    """
+
+    def __init__(self, points: np.ndarray, s: np.ndarray, curvature: np.ndarray,
+                 limits: ProfileLimits | None = None, *,
+                 orientation=None, theta: float = 0.0) -> None:
+        self.points = np.asarray(points, dtype=float).reshape(-1, 2)
+        self.s = np.asarray(s, dtype=float).ravel()
+        self.curvature = np.asarray(curvature, dtype=float).ravel()
+        self.limits = limits or ProfileLimits()
+        self._orientation = orientation
+        self._theta_fixed = float(theta)
+        self._build()
+
+    def _build(self) -> None:
+        lim = self.limits
+        n = len(self.points)
+        if n < 2:
+            self._t = np.zeros(max(n, 1))
+            self._v = np.zeros(max(n, 1))
+            self._theta = np.full(max(n, 1), self._theta_fixed)
+            return
+
+        ds = np.diff(self.s)
+        ds = np.maximum(ds, 1e-9)
+        v = np.minimum(lim.v_max,
+                       np.sqrt(lim.a_lat_max / np.maximum(self.curvature, 1e-9)))
+        v[0] = 0.0
+        v[-1] = 0.0
+        for i in range(1, n):              # forward: how fast can we arrive?
+            v[i] = min(v[i], np.sqrt(v[i - 1] ** 2 + 2 * lim.a_max * ds[i - 1]))
+        for i in range(n - 2, -1, -1):     # backward: can we still stop in time?
+            v[i] = min(v[i], np.sqrt(v[i + 1] ** 2 + 2 * lim.a_max * ds[i]))
+
+        dt = 2.0 * ds / np.maximum(v[:-1] + v[1:], 1e-6)
+        self._t = np.concatenate([[0.0], np.cumsum(dt)])
+        self._v = v
+
+        if self._orientation is not None:
+            s_norm = self.s / max(self.s[-1], 1e-9)
+            self._theta = np.array([self._orientation.sample(u) for u in s_norm])
+        else:
+            self._theta = np.full(n, self._theta_fixed)
+
+    @property
+    def duration(self) -> float:
+        return float(self._t[-1])
+
+    def sample(self, t: float) -> TrajectoryPoint:
+        t = float(np.clip(t, 0.0, self.duration))
+        i = int(np.searchsorted(self._t, t, side="right")) - 1
+        i = max(0, min(i, len(self._t) - 2)) if len(self._t) > 1 else 0
+        if len(self._t) < 2:
+            x, y = self.points[0]
+            return TrajectoryPoint(t, x, y, self._theta[0], 0, 0, 0, 0, 0)
+
+        span = max(self._t[i + 1] - self._t[i], 1e-9)
+        a = (t - self._t[i]) / span
+        p = self.points[i] * (1 - a) + self.points[i + 1] * a
+        speed = self._v[i] * (1 - a) + self._v[i + 1] * a
+        heading = self._theta[i] * (1 - a) + self._theta[i + 1] * a
+
+        d = self.points[i + 1] - self.points[i]
+        n = float(np.hypot(d[0], d[1]))
+        tangent = d / n if n > 1e-9 else np.array([1.0, 0.0])
+        accel = (self._v[i + 1] - self._v[i]) / span
+        thd = (self._theta[i + 1] - self._theta[i]) / span
+        return TrajectoryPoint(
+            t=t, x=float(p[0]), y=float(p[1]), theta=float(heading),
+            xd=float(tangent[0] * speed), yd=float(tangent[1] * speed),
+            thd=float(thd),
+            xdd=float(tangent[0] * accel), ydd=float(tangent[1] * accel),
+        )
+
+
 class TrajectoryFollower:
     """Position PID (per axis) + velocity feed-forward -> body velocity cmd."""
 

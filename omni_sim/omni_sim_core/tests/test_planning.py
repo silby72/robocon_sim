@@ -278,3 +278,167 @@ def test_plan_under_one_second_on_full_field():
     dt = time.perf_counter() - t0
     assert r.success
     assert dt < 1.0, f"plan took {dt:.3f}s (>1s budget)"
+
+
+# --------------------------------------------------------------------------- #
+# multi-level transition waypoints vs the real chassis radius
+# --------------------------------------------------------------------------- #
+
+def test_transition_waypoints_are_plannable_for_the_real_chassis():
+    """Every stitched-plan waypoint must be non-lethal on its OWN level's grid.
+
+    These four points are the only thing holding a multi-level plan together:
+    A* runs per level, and each leg's endpoint is one of them. A waypoint that
+    drifts into inflation doesn't degrade gracefully -- the whole plan fails
+    with "goal shifted out of inflation" and the robot never moves.
+
+    They were originally hand-tuned against r_circ=0.45. The real 0.9 m square
+    chassis circumscribes at 0.636 m, which moved every free band and made all
+    four lethal at once; the corridors are narrow enough (the L1 ring is 1.5 m
+    wide, leaving 0.228 m after inflating both sides) that this is a real risk
+    on any chassis or field-spec change. scripts/measure_corridors.py prints
+    the bands these have to sit in.
+    """
+    from pathlib import Path
+
+    from omni_sim_core.field import LayeredField
+    from omni_sim_core.ui.leveled_field_2027 import (_RAMP_WAYPOINTS_M,
+                                                     _STAIRS_WAYPOINTS_M)
+
+    root = Path(__file__).resolve().parents[2]
+    field = LayeredField.from_yaml(root / "config" / "field" / "robocon2027.yaml")
+    r_circ = 0.9 * np.sqrt(2) / 2                      # config/robot/chassis.yaml
+    cfields = {lvl: CostField(field.grid(lvl, "nav"), PlanConfig(r_circ=r_circ))
+               for lvl in ("ground", "l1", "l2")}
+
+    def assert_free(level, pt, what):
+        g = field.grid(level, "nav")
+        r, c = g.world_to_grid(*pt)
+        assert not cfields[level].lethal[r, c], (
+            f"{what} {pt} is lethal on {level} at r_circ={r_circ:.3f} -- "
+            "re-measure with scripts/measure_corridors.py")
+
+    ground_pt, l1_pt = _RAMP_WAYPOINTS_M["red"]
+    assert_free("ground", ground_pt, "red ramp ground-side waypoint")
+    assert_free("l1", l1_pt, "red ramp L1-side waypoint")
+
+    ground_pt, l1_pt = _RAMP_WAYPOINTS_M["blue"]
+    assert_free("ground", ground_pt, "blue ramp ground-side waypoint")
+    assert_free("l1", l1_pt, "blue ramp L1-side waypoint")
+
+    l1_pt, l2_pt = _STAIRS_WAYPOINTS_M
+    assert_free("l1", l1_pt, "stairs L1-side waypoint")
+    assert_free("l2", l2_pt, "stairs L2-side waypoint")
+
+
+def test_l1_ring_is_reachable_from_the_ramp_and_reaches_the_stairs():
+    """The ground->L1->L2 chain exists as *connected free space*, not just as
+    four waypoints that each happen to be free.
+
+    The L1 ring is the tight link: 1.5 m between the L1 and L2 slab edges, and
+    the centre divider fence stub sticks into it, so the reachable part stops
+    at the Stairs gate's western sliver. If it stops any earlier, L2 becomes
+    unreachable for this chassis and the multi-level planner is decorative.
+    """
+    from pathlib import Path
+
+    from scipy.ndimage import label
+
+    from omni_sim_core.field import LayeredField
+    from omni_sim_core.ui.leveled_field_2027 import (_RAMP_WAYPOINTS_M,
+                                                     _STAIRS_WAYPOINTS_M)
+
+    root = Path(__file__).resolve().parents[2]
+    field = LayeredField.from_yaml(root / "config" / "field" / "robocon2027.yaml")
+    g = field.grid("l1", "nav")
+    cf = CostField(g, PlanConfig(r_circ=0.9 * np.sqrt(2) / 2))
+
+    comp, _ = label(~cf.lethal)
+    r, c = g.world_to_grid(*_RAMP_WAYPOINTS_M["red"][1])   # where the ramp lands
+    ramp_side = comp[r, c]
+    assert ramp_side != 0, "the ramp exit itself is lethal on L1"
+
+    r, c = g.world_to_grid(*_STAIRS_WAYPOINTS_M[0])        # foot of the stairs
+    assert comp[r, c] == ramp_side, (
+        "the L1 stairs waypoint is not reachable from the ramp exit -- "
+        "L2 is cut off for this chassis")
+
+
+def test_the_planner_grid_refuses_the_opponents_half():
+    """A* must not offer a route the collision rule will then refuse.
+
+    Rule 6.2.2 lives in ``LeveledField.is_blocked``, which the raster knows
+    nothing about, so for a while the two disagreed: asked for a goal whose
+    shortest route crossed the centre line, the planner returned a 29 m path
+    around the outside of the field through the blue half, the robot followed
+    it for a few metres and jammed against a wall in no grid -- with the plan
+    still drawn on screen showing the way "through". The planner grid carries
+    the rule now; this pins that down.
+    """
+    from pathlib import Path
+
+    from omni_sim_core.env.occupancy_grid import OCCUPIED
+    from omni_sim_core.ui.leveled_field_2027 import LeveledField
+
+    maps = Path(__file__).resolve().parents[2] / "maps"
+    yamls = [maps / f"field_2027_{lvl}.yaml" for lvl in ("ground", "l1", "l2")]
+    if not all(p.exists() for p in yamls):
+        pytest.skip("generated maps/ not present")
+
+    lf = LeveledField(*(str(p) for p in yamls), team="red")
+    for level in ("ground", "l1"):
+        g = lf.territory_masked_grid(level)
+        # deep in the opponent's half, far from any wall -> occupied for us
+        r, c = g.world_to_grid(9.5, 5.0)
+        assert g.grid[r, c] == OCCUPIED, f"{level}: blue half is plannable"
+        # ...and every free cell left is somewhere we are allowed to be
+        for row in range(0, g.height, 17):
+            for col in range(0, g.width, 17):
+                if g.grid[row, col] != OCCUPIED:
+                    x, y = g.grid_to_world(row, col)
+                    assert lf.territory_ok(level, x, y), (
+                        f"{level}: ({x:.2f}, {y:.2f}) is plannable but "
+                        "territory_ok() would refuse it")
+
+    # the Ground Shared Area straddles the centre line and stays open
+    g = lf.territory_masked_grid("ground")
+    r, c = g.world_to_grid(5.6, 1.0)
+    assert g.grid[r, c] != OCCUPIED, "the Ground Shared Area was masked away"
+
+    # L2 is one Shared Area -- masking it would cut the field in half for no
+    # reason, so it must come back untouched (identically, not just equal)
+    assert lf.territory_masked_grid("l2") is lf.grids["l2"]
+
+
+def test_gate_waypoint_pairs_are_two_distinct_points():
+    """The two sides of a gate are a gap apart, so a stitched multi-level plan
+    must keep *both*.
+
+    sim_node concatenates one A* leg per level and used to drop each new leg's
+    first point as "the point shared with the previous leg". Legs are not
+    contiguous across a gate: leg k ends on the *from* side and leg k+1 starts
+    on the *to* side, with the un-plannable slope in between. Dropping it made
+    the followed path run from one side of the gate straight to the next free
+    vertex beyond it -- a diagonal that leaves the gate rectangle, where no
+    level is in play, so the robot jammed half-way through the transition and
+    the follower then quietly gave up. Nothing here shares a point: check it.
+    """
+    from pathlib import Path
+
+    from omni_sim_core.ui.leveled_field_2027 import LeveledField
+
+    maps = Path(__file__).resolve().parents[2] / "maps"
+    yamls = [maps / f"field_2027_{lvl}.yaml" for lvl in ("ground", "l1", "l2")]
+    if not all(p.exists() for p in yamls):
+        pytest.skip("generated maps/ not present")
+
+    for team in ("red", "blue"):
+        lf = LeveledField(*(str(p) for p in yamls), team=team)
+        for a, b in (("ground", "l1"), ("l1", "l2")):
+            for lo, hi in ((a, b), (b, a)):            # both directions
+                p, q = lf.transition_waypoint_pair(lo, hi)
+                gap = np.hypot(q[0] - p[0], q[1] - p[1])
+                assert gap > lf.grids[lo].meta.resolution, (
+                    f"{team} {lo}->{hi}: the gate's two waypoints are {gap:.3f} m "
+                    "apart -- if they ever coincide, revisit the de-duplication "
+                    "in sim_node._on_goal_pose")

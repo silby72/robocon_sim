@@ -1,0 +1,16 @@
+running develop
+running egg_info
+writing omni_sim_ros.egg-info/PKG-INFO
+writing dependency_links to omni_sim_ros.egg-info/dependency_links.txt
+writing entry points to omni_sim_ros.egg-info/entry_points.txt
+writing requirements to omni_sim_ros.egg-info/requires.txt
+writing top-level names to omni_sim_ros.egg-info/top_level.txt
+reading manifest file 'omni_sim_ros.egg-info/SOURCES.txt'
+writing manifest file 'omni_sim_ros.egg-info/SOURCES.txt'
+running build_ext
+Creating /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/lib/python3.12/site-packages/omni-sim-ros.egg-link (link to .)
+Installing sim_node script to /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/bin
+
+Installed /home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros
+running symlink_data
+symbolically linking /home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros/launch/sim_with_dashboard.launch.py -> /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/share/omni_sim_ros/launch

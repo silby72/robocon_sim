@@ -28,6 +28,31 @@ class LayerSpec:
     holes: tuple[tuple[float, float, float, float], ...] = ()  # drops in the slab
 
 
+@dataclass(frozen=True)
+class ConnectorSpec:
+    """A drivable surface that joins two layers -- a ramp, and its doorway.
+
+    Layer grids describe *one* floor height each, so a sloped surface belongs
+    to neither: it is the ground's ceiling and L1's cellar at the same time.
+    Without one, ``slice_nav`` stamps the upper slab as a 600 mm wall on the
+    ground grid and "off the slab is a fall" on the upper grid, so the two
+    grids are disconnected and no multi-layer plan can exist -- the planner
+    silently reports "goal shifted out of inflation" and the transition has to
+    be faked by stitching two legs across a gap nothing cleared.
+
+    A connector is the fix: a rectangle carved FREE on the layers it ``links``,
+    *after* obstacles are stamped, so it also punches the doorway through the
+    perimeter barrier standing between the ramp top and the slab. Carve it on
+    the layer(s) where the robot is committed to that floor; the genuinely
+    ambiguous middle of the slope is handled by the gate mechanism in
+    ``ui/leveled_field_2027.py``, not here.
+    """
+
+    name: str
+    rect: tuple[float, float, float, float]   # (x0,y0,x1,y1) [m]
+    links: tuple[str, ...]                    # layer names to carve it FREE on
+
+
 @dataclass
 class FieldSpec:
     size: tuple[float, float]            # (W, H) [m]
@@ -37,6 +62,7 @@ class FieldSpec:
     lidar_height: float                  # [m] above each layer floor
     robot_band: tuple[float, float]      # (lo, hi) [m] above floor
     unknown_defaults: dict[str, float]   # name -> default value [mm] (raw)
+    connectors: tuple[ConnectorSpec, ...] = ()
     _raw_geometry: list[dict] = field(default_factory=list)
     _to_m: float = 1.0                   # unit scale (mm->m = 1e-3)
 
@@ -67,9 +93,15 @@ class FieldSpec:
         unknown_defaults = {k: float(v["default"])
                             for k, v in cfg.get("unknowns", {}).items()}
 
+        connectors = tuple(
+            ConnectorSpec(name=c["name"],
+                          rect=tuple(float(v) * to_m for v in c["rect"]),
+                          links=tuple(c["links"]))
+            for c in cfg.get("connectors", []))
+
         return cls(size=size, resolution=res, origin=origin, layers=layers,
                    lidar_height=lidar_h, robot_band=band,
-                   unknown_defaults=unknown_defaults,
+                   unknown_defaults=unknown_defaults, connectors=connectors,
                    _raw_geometry=list(cfg.get("geometry", [])), _to_m=to_m)
 
     # -- primitive construction ------------------------------------------

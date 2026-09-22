@@ -102,8 +102,21 @@ def wall_scene(field_yaml: str | Path) -> dict[str, Any]:
         }
         for name, layer in spec.layers.items()
     }
-    connectors = [{"name": c.name, "rect": [v * 1000.0 for v in c.rect],
-                   "links": list(c.links)} for c in spec.connectors]
+    # Connectors carry their slope so a viewer can show which way is uphill
+    # and how steep: a ramp drawn as a flat rectangle is indistinguishable
+    # from a painted stripe.
+    from ..field.slope import SlopeField
+
+    slopes = {s.name: s for s in SlopeField.from_spec(spec).slopes}
+    connectors = []
+    for c in spec.connectors:
+        entry = {"name": c.name, "rect": [v * 1000.0 for v in c.rect],
+                 "links": list(c.links)}
+        s = slopes.get(c.name)
+        if s is not None:
+            entry.update(uphill=list(s.uphill()), pitch=round(s.angle_deg, 2),
+                         rise=s.rise * 1000.0, run=s.run * 1000.0)
+        connectors.append(entry)
     return {"walls": walls, "layers": layers, "connectors": connectors,
             "size": [spec.size[0] * 1000.0, spec.size[1] * 1000.0],
             "resolution": spec.resolution * 1000.0,
@@ -152,7 +165,8 @@ def robot_scene(chassis_yaml: str | Path) -> dict[str, Any]:
 
 def build_scene(field_yaml: str | Path | None = None,
                 chassis_yaml: str | Path | None = None,
-                team: str = "red") -> dict[str, Any]:
+                team: str = "red",
+                motors: dict[str, Any] | None = None) -> dict[str, Any]:
     """Assemble the full scene. Both files are optional: a missing chassis
     just means a front-end has no body to draw, which is exactly the state
     this module exists to get out of, so it is reported rather than hidden."""
@@ -168,6 +182,11 @@ def build_scene(field_yaml: str | Path | None = None,
         },
         "missing": [],
     }
+    # {"available": [...], "current": "...", "spec": {...}} when the caller can
+    # actually swap the drivetrain; a front-end without this renders no picker
+    # rather than one that silently does nothing.
+    if motors is not None:
+        scene["motors"] = motors
     if field_yaml and Path(field_yaml).exists():
         scene.update(wall_scene(field_yaml))
     else:

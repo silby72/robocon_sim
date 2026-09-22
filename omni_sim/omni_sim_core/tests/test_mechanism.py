@@ -194,10 +194,26 @@ odometry:
 
 
 def test_chassis_without_odometry_still_valid():
-    # backward compatibility: the key is optional
+    """Backward compatibility: the ``odometry:`` key is optional.
+
+    Tested by removing the key, not by assuming the shipped chassis.yaml lacks
+    one -- it has a dead-wheel pod now, and an assertion that reads the repo's
+    own config cannot tell "the key is optional" from "nobody has used it yet".
+    """
+    from omni_sim_core.mechanism.schema import Chassis
+    doc = rt_load(CONFIG / "robot" / "chassis.yaml")
+    doc.pop("odometry", None)
+    assert Chassis.from_doc(doc).odometry == []
+
+
+def test_chassis_with_odometry_parses_the_units():
     from omni_sim_core.mechanism.schema import Chassis
     chassis = Chassis.from_doc(rt_load(CONFIG / "robot" / "chassis.yaml"))
-    assert chassis.odometry == []
+    for o in chassis.odometry:
+        assert o.type in ("dead_wheel", "optical")
+        if o.type == "dead_wheel":
+            assert o.radius_m and o.radius_m > 0
+            assert o.measure_axis_rad is not None
 
 
 # override routing: datasheet keys re-derive, param keys apply post-derive -----

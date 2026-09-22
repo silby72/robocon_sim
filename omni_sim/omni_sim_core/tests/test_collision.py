@@ -37,14 +37,18 @@ def fp():
     return RobotFootprint(length=0.9, width=0.9)   # config/robot/chassis.yaml
 
 
-def _covered_cells(lf, level, poly):
-    """Cells the polygon covers that are occupied -- by an independent method.
+def _occupied_under(lf, levels, poly):
+    """Cells the polygon covers that are occupied on *every* level in
+    ``levels`` -- an independent oracle for what is genuinely solid there.
 
     Even-odd point-in-polygon and a plain loop, deliberately *not* the convex
     cross-product test ``is_blocked`` uses, so agreement between the two means
-    something.
+    something. Intersecting across levels (rather than, say, taking the
+    smallest per-level count) is the whole point mid-gate: the ground raster
+    and the L1 raster each call most of the other's floor a wall, so only what
+    both refuse is actually solid.
     """
-    g = lf.grids[level]
+    g = lf.grids[levels[0]]
     res, (ox, oy, _) = g.meta.resolution, g.meta.origin
     c0 = int(np.floor((poly[:, 0].min() - ox) / res))
     c1 = int(np.floor((poly[:, 0].max() - ox) / res)) + 2
@@ -65,7 +69,9 @@ def _covered_cells(lf, level, poly):
                 j = i
             if not inside:
                 continue
-            if not g.in_bounds(row, col) or g.is_occupied(row, col):
+            solid = all(not lf.grids[lv].in_bounds(row, col)
+                        or lf.grids[lv].is_occupied(row, col) for lv in levels)
+            if solid:
                 n += 1
     return n
 
@@ -82,10 +88,17 @@ def test_the_level_cannot_change_away_from_a_gate(lf):
 
 
 def test_the_level_does_change_through_the_ramp(lf):
-    """...and the Ramp still works, or the fix above would just be a wall."""
+    """...and the Ramp still works, or the fix above would just be a wall.
+
+    The route is: north up the slope (no gate -- only the ground grid clears
+    the slope), then east off the landing onto the slab, which is the move the
+    gate covers."""
     level = "ground"
-    for x in np.arange(1.2, 3.61, 0.02):
-        level, _ = lf.resolve_level(level, float(x), 4.75)   # through the Ramp
+    for y in np.arange(3.2, 6.31, 0.02):            # up the slope
+        level, _ = lf.resolve_level(level, 2.0, float(y))
+    assert level == "ground", "the slope itself should not promote to L1"
+    for x in np.arange(2.0, 3.81, 0.02):            # off the landing, onto L1
+        level, _ = lf.resolve_level(level, float(x), 6.2)
     assert level == "l1", "the Ramp no longer gets the robot onto L1"
 
 
@@ -96,9 +109,13 @@ def test_no_accepted_pose_overlaps_a_wall(lf, fp):
     every 15 deg of heading -- the pillar is the case corner sampling was
     worst at, being narrower than the body.
     """
-    thetas = np.deg2rad(np.arange(0, 90, 15))
-    cases = [("ground", np.arange(1.70, 3.20, 0.03), np.array([7.5])),
-             ("ground", np.arange(4.70, 6.30, 0.05), np.arange(7.20, 8.80, 0.05))]
+    # Step sizes are a deliberate compromise: the oracle below is a plain
+    # Python loop over cells, so a fine sweep costs minutes. These catch the
+    # defect this pins down (the pillar case fails at any resolution) while
+    # keeping the file a few seconds.
+    thetas = np.deg2rad(np.arange(0, 90, 22.5))
+    cases = [("ground", np.arange(0.80, 3.20, 0.06), np.array([7.5])),
+             ("ground", np.arange(4.30, 6.70, 0.10), np.arange(6.80, 9.20, 0.10))]
     checked = 0
     for level, xs, ys in cases:
         for th in thetas:
@@ -112,10 +129,10 @@ def test_no_accepted_pose_overlaps_a_wall(lf, fp):
                     if lf.is_blocked(levels, poly):
                         continue
                     checked += 1
-                    assert _covered_cells(lf, levels[0], poly) == 0, (
+                    assert _occupied_under(lf, levels, poly) == 0, (
                         f"accepted ({x:.2f}, {y:.2f}) th={th:.2f} on {levels[0]} "
                         "but the body covers occupied cells")
-    assert checked > 100, "the sweep accepted almost nothing -- check the setup"
+    assert checked > 50, "the sweep accepted almost nothing -- check the setup"
 
 
 def test_a_thin_wall_between_the_corners_is_not_missed(lf, fp):
@@ -126,7 +143,7 @@ def test_a_thin_wall_between_the_corners_is_not_missed(lf, fp):
     also refuse this pose; the point is that the *barrier cells* are counted.)
     """
     poly = fp.corners(2.50, 7.50, 0.0)            # centred on the west barrier
-    assert _covered_cells(lf, "l1", poly) > 0, "test pose misses the barrier"
+    assert _occupied_under(lf, ("l1",), poly) > 0, "test pose misses the barrier"
     assert lf.is_blocked(("l1",), poly)
 
 
@@ -136,9 +153,9 @@ def test_the_gate_tolerance_is_at_most_one_cell(lf, fp):
     granted -- and it stays one cell, not one body."""
     res = lf.grids["ground"].meta.resolution
     worst = 0
-    for th in np.deg2rad(np.arange(0, 90, 15)):
-        for x in np.arange(1.90, 3.40, 0.03):
-            for y in np.arange(2.80, 3.40, 0.05):
+    for th in np.deg2rad(np.arange(0, 90, 22.5)):
+        for x in np.arange(1.90, 3.40, 0.06):
+            for y in np.arange(5.50, 6.60, 0.10):
                 lf._gate_pending = None
                 _, levels = lf.resolve_level("l1", float(x), float(y))
                 if len(levels) < 2:
@@ -146,11 +163,9 @@ def test_the_gate_tolerance_is_at_most_one_cell(lf, fp):
                 poly = fp.corners(float(x), float(y), float(th))
                 if lf.is_blocked(levels, poly):
                     continue
-                # cells occupied on *every* level in play, i.e. genuinely solid
-                shared = min(_covered_cells(lf, lv, poly) for lv in levels)
-                worst = max(worst, shared)
+                worst = max(worst, _occupied_under(lf, levels, poly))
     # one cell of skin around the body's outline, not a body-sized overlap
-    perimeter_cells = int(np.ceil(4 * 0.9 / res))
+    perimeter_cells = int(np.ceil(4 * 0.7 / res))
     assert worst <= perimeter_cells, (
         f"mid-gate tolerance let {worst} solid cells under the body "
         f"(a one-cell skin would be about {perimeter_cells})")

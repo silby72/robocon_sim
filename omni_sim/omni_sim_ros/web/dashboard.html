@@ -111,6 +111,42 @@
   #planStatus .ok, #robotStatus .ok { color: var(--good); }
   #planStatus .bad, #robotStatus .bad { color: var(--bad); }
   #robotStatus .key { color: var(--accent); }
+  #stateBox { margin: 8px 8px 0; font-size: 11px; }
+  #stateBox .chips {
+    display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 4px;
+  }
+  #stateBox .chip {
+    padding: 1px 6px; border-radius: 9px; border: 1px solid #3a3a3a;
+    color: #6a6a6a; white-space: nowrap;
+  }
+  /* visited but not current: the trace, not just the readout */
+  #stateBox .chip.seen { color: var(--text); border-color: #555; }
+  #stateBox .chip.on {
+    background: var(--title); border-color: var(--title); color: #08222a;
+    font-weight: 600;
+  }
+  #stateBox .chip.on.bad { background: var(--bad); border-color: var(--bad); color: #2a0808; }
+  #trace { color: var(--muted); margin-top: 2px; overflow-wrap: anywhere; }
+  #motorBox {
+    margin: 8px 8px 0;
+    font-size: 11.5px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  #motorBox label { color: var(--accent); }
+  #motorBox select {
+    background: #1c1c1c;
+    border: 1px solid #444;
+    color: var(--text);
+    border-radius: 4px;
+    padding: 3px 6px;
+    font-family: inherit;
+    font-size: 11.5px;
+  }
+  #motorNote { color: var(--muted); }
   #robotStatus .lvl {
     display: inline-block;
     padding: 1px 6px;
@@ -205,6 +241,17 @@
     <h2>Map &amp; Planning</h2>
     <canvas id="mapCanvas" width="800" height="800"></canvas>
     <div id="robotStatus">waiting for <code>/sim/scene</code>&hellip;</div>
+    <div id="stateBox" hidden>
+      <div class="chips" id="ctrlChips"></div>
+      <div class="chips" id="phaseChips"></div>
+      <div id="trace"></div>
+    </div>
+    <div id="motorBox" hidden>
+      <label for="motorSel">drive motor</label>
+      <select id="motorSel"></select>
+      <span id="motorNote"></span>
+      <button id="reloadBtn" title="re-read config/robot/* (what the GUI's chassis and actuator pages write)">reload config</button>
+    </div>
     <div id="mapHint">
       Click the field to send a goal on <code>/goal_pose</code> (A* runs from the robot's current pose, result on <code>/plan</code>, the followed C&sup2; curve on <code>/trajectory</code>).<br>
       <b>hatched</b> = a wall <i>at the robot's current level</i> &middot;
@@ -375,7 +422,8 @@ let FIELD_MM = 11000;
 const rgba = (r, g, b, a) => `rgba(${r},${g},${b},${a})`;
 
 let mapReady = false;
-let robotPose = null;   // {x, y, theta} metres/rad
+let robotPose = null;   // {x, y, theta} metres/rad -- ground truth
+let odomPose = null;    // what wheel odometry believes
 let planPoints = [];    // [[x,y], ...] metres -- the A* polyline
 let trajPoints = [];    // [[x,y], ...] metres -- the C2 curve actually followed
 let lastGoal = null;    // {x, y} as clicked
@@ -542,11 +590,23 @@ function drawLevelEdge(ctx, canvas, level) {
     ctx.setLineDash([]);
   }
   // ...but the ramps still matter there: from the ground they are the only
-  // way up, so outline them on every layer they link, not just the raised ones
+  // way up, so outline them on every layer they link, not just the raised
+  // ones, and shade them along the climb so which way is uphill is visible
+  // rather than something you infer from the rest of the field.
   for (const conn of (scene.connectors || [])) {
     if (!conn.links.includes(level)) continue;
     const [cx0, cy0, cx1, cy1] = conn.rect;
     const [rax, ray] = toC(cx0, cy1), [rbx, rby] = toC(cx1, cy0);
+    if (conn.uphill) {
+      const [ux, uy] = conn.uphill;
+      const g = ctx.createLinearGradient(
+        ux > 0 ? rax : rbx, uy > 0 ? rby : ray,
+        ux > 0 ? rbx : rax, uy > 0 ? ray : rby);
+      g.addColorStop(0, "rgba(0,215,95,0.05)");
+      g.addColorStop(1, "rgba(0,215,95,0.35)");   // bright end is the top
+      ctx.fillStyle = g;
+      ctx.fillRect(rax, ray, rbx - rax, rby - ray);
+    }
     ctx.strokeStyle = "#00d75f";
     ctx.lineWidth = 1.5;
     ctx.strokeRect(rax, ray, rbx - rax, rby - ray);
@@ -669,7 +729,32 @@ function drawMap() {
     }
   }
 
+  drawOdomGhost(ctx, canvas);
   drawRobot(ctx, canvas);
+}
+
+/** The believed pose, dashed and hollow. Deliberately drawn *under* the real
+ *  robot: when odometry is good the two coincide and the ghost is invisible,
+ *  which is exactly the right amount of attention for a well-behaved
+ *  estimator. */
+function drawOdomGhost(ctx, canvas) {
+  if (!odomPose || !scene || !scene.robot) return;
+  const [cx, cy] = worldToCanvas(odomPose.x, odomPose.y, canvas);
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(-odomPose.theta);
+  ctx.strokeStyle = "rgba(255,175,0,0.85)";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  scene.robot.footprint.forEach(([x, y], i) => {
+    const px = mmToPx(x, canvas), py = -mmToPx(y, canvas);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  });
+  ctx.closePath();
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
 }
 
 function renderRobotStatus() {
@@ -685,7 +770,19 @@ function renderRobotStatus() {
                '(collision judging is off too)');
   }
   if (simState) {
-    parts.push(`<span class="key">level</span> <span class="lvl">${simState.level}</span>` +
+    const z = (simState.z !== undefined)
+      ? ` &middot; <span class="key">z</span> ${(simState.z * 1000).toFixed(0)} mm`
+        + (simState.on_slope
+            ? ` <span class="bad">${simState.pitch.toFixed(1)}° on ${simState.on_slope}</span>`
+            : "")
+      : "";
+    if (robotPose && odomPose) {
+      const d = Math.hypot(robotPose.x - odomPose.x, robotPose.y - odomPose.y);
+      const dth = Math.abs(((robotPose.theta - odomPose.theta) * 180 / Math.PI));
+      parts.push(`<span class="key">odom drift</span> ${(d * 1000).toFixed(0)} mm` +
+                 ` &middot; ${dth.toFixed(2)}\u00b0 <span class="key">(dashed ghost)</span>`);
+    }
+    parts.push(`<span class="key">level</span> <span class="lvl">${simState.level}</span>` + z +
                (simState.blocked
                  ? ' <span class="bad">BLOCKED</span>'
                  : ' <span class="ok">clear</span>') +
@@ -693,6 +790,74 @@ function renderRobotStatus() {
                (simState.following ? " &middot; following" : ""));
   }
   $("robotStatus").innerHTML = parts.join("<br>");
+  renderStates();
+  renderMotorPicker();
+}
+
+// Two small state machines (omni_sim_core/ui/phase.py): what the executive is
+// doing, and where on the field the robot is. Both are drawn as the full set
+// of possible states with the current one lit and the ones already visited
+// kept bright -- a bare current value is a readout, the sequence is the trace,
+// and the trace is the part worth looking at.
+const CONTROL_STATES = ["idle", "planning", "following", "held", "blocked",
+                        "arrived", "gave_up", "manual"];
+const MATCH_PHASES = ["start", "ground", "transfer", "storage", "ramp", "l1",
+                      "stairs", "l2", "shared", "retry"];
+const BAD_STATES = new Set(["blocked", "gave_up"]);
+
+function renderChips(el, all, cur, seen) {
+  el.innerHTML = "";
+  for (const name of all) {
+    const c = document.createElement("span");
+    c.className = "chip" + (name === cur ? " on" : seen.has(name) ? " seen" : "")
+                + (name === cur && BAD_STATES.has(name) ? " bad" : "");
+    c.textContent = name;
+    el.appendChild(c);
+  }
+}
+
+function renderStates() {
+  const s = simState;
+  const box = $("stateBox");
+  if (!s || !s.control || !s.phase) { box.hidden = true; return; }
+  box.hidden = false;
+  renderChips($("ctrlChips"), CONTROL_STATES, s.control.current,
+              new Set(s.control.history.map((h) => h[1])));
+  renderChips($("phaseChips"), MATCH_PHASES, s.phase.current,
+              new Set(s.phase.history.map((h) => h[1])));
+  const trace = s.phase.history.map(([t, v]) => `${v}@${t.toFixed(1)}s`).join(" → ");
+  $("trace").textContent = trace;
+}
+
+// Swapping the drive motor rebuilds the plant in the node and keeps the pose,
+// so the same manoeuvre can be re-run back to back on a different drivetrain.
+// The node does NOT write the choice back to config/robot/actuators.yaml --
+// this is for asking "would AK40s climb that ramp?", not for editing the robot.
+let motorPub = null;
+function renderMotorPicker() {
+  const m = scene && scene.motors;
+  const box = $("motorBox");
+  if (!m || !m.available || !m.available.length) { box.hidden = true; return; }
+  box.hidden = false;
+  const sel = $("motorSel");
+  if (sel.options.length !== m.available.length) {
+    sel.innerHTML = "";
+    for (const name of m.available) {
+      const o = document.createElement("option");
+      o.value = o.textContent = name;
+      sel.appendChild(o);
+    }
+    sel.onchange = () => {
+      if (!motorPub) return;
+      $("motorNote").textContent = "rebuilding…";
+      motorPub.publish(new ROSLIB.Message({ data: sel.value }));
+    };
+  }
+  if (document.activeElement !== sel) sel.value = m.current || "";
+  const swapped = m.configured && m.current && m.current !== m.configured;
+  $("motorNote").innerHTML =
+    `Kt ${m.kt} Nm/A &middot; R ${m.resistance} Ω` +
+    (swapped ? ` &middot; <span class="bad">not ${m.configured}</span>` : "");
 }
 
 function yawFromQuat(q) {
@@ -732,6 +897,18 @@ function initMap() {
     .subscribe((msg) => {
       trajPoints = msg.poses.map((p) => [p.pose.position.x, p.pose.position.y]);
       drawMap();
+    });
+
+  // What the robot *believes* its pose is, from wheel odometry. Drawn as a
+  // ghost against the true pose: the gap between them is the whole reason an
+  // odometry error model exists, and it is invisible in a number.
+  new ROSLIB.Topic({ ros, name: "/odom", messageType: "nav_msgs/msg/Odometry" })
+    .subscribe((msg) => {
+      odomPose = {
+        x: msg.pose.pose.position.x,
+        y: msg.pose.pose.position.y,
+        theta: yawFromQuat(msg.pose.pose.orientation),
+      };
     });
 
   new ROSLIB.Topic({ ros, name: "/ground_truth/odom", messageType: "nav_msgs/msg/Odometry" })
@@ -778,6 +955,17 @@ function initMap() {
       drawMap();
     });
 
+  motorPub = new ROSLIB.Topic({ ros, name: "/sim/set_motor",
+                                messageType: "std_msgs/msg/String" });
+  // Re-read config/robot/* without restarting the node. The GUI writes those
+  // files; before this the only ways to pick an edit up were a restart or a
+  // motor swap, which reloaded everything as a side effect.
+  const reloadPub = new ROSLIB.Topic({ ros, name: "/sim/reload_robot",
+                                       messageType: "std_msgs/msg/String" });
+  $("reloadBtn").onclick = () => {
+    $("motorNote").textContent = "reloading\u2026";
+    reloadPub.publish(new ROSLIB.Message({ data: "" }));
+  };
   goalPub = new ROSLIB.Topic({ ros, name: "/goal_pose", messageType: "geometry_msgs/msg/PoseStamped" });
   $("mapCanvas").onclick = (ev) => {
     const canvas = $("mapCanvas");

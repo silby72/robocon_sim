@@ -139,58 +139,82 @@ def test_mm_to_si_conversion(field):
 
 # --- connectors (ramps): the join between layer grids -----------------------
 
-def test_ramp_is_free_on_both_layers_it_links(field):
-    """The ramp carve connects the ground and L1 grids.
+def test_the_ramp_connects_the_ground_and_l1_grids(field):
+    """Without a connector the two grids are disjoint -- the L1 slab is a
+    600 mm wall from below and "off the slab is a fall" from above -- so no
+    ground->L1 plan can exist at all.
 
-    Without it the two grids are disjoint -- the L1 slab is a 600 mm wall from
-    below and "off the slab is a fall" from above -- so no ground->L1 plan can
-    exist at all and the transition can only be faked by stitching two legs
-    across a gap nothing ever cleared.
+    The two layers are carved *differently*: the whole ramp on the ground (all
+    of it is drivable from below), but only the landing on L1, because a ramp
+    is level with the slab only at its top. Carving the full footprint on L1
+    would let a robot step onto the slab from any height part-way up.
     """
-    for layer in ("ground", "l1"):
-        g = field.grid(layer, "nav")
-        r, c = g.world_to_grid(2.0, 4.75)     # mid-ramp, red side
-        assert not g.is_occupied(r, c), f"ramp not carved on {layer}"
+    ground = field.grid("ground", "nav")
+    l1 = field.grid("l1", "nav")
+
+    r, c = ground.world_to_grid(2.0, 4.5)          # half way up the slope
+    assert not ground.is_occupied(r, c), "the ramp is not carved on the ground"
+    r, c = l1.world_to_grid(2.0, 4.5)
+    assert l1.is_occupied(r, c), "mid-slope must NOT be standable on L1"
+
+    r, c = l1.world_to_grid(2.0, 6.2)              # the landing, at slab height
+    assert not l1.is_occupied(r, c), "the landing is not carved on L1"
 
 
-def test_ramp_carve_punches_the_l1_barrier(field):
-    """The carve overshoots the slab edge by half the barrier thickness.
-
-    Stopping flush at x=2.5 would leave the perimeter barrier standing across
-    the ramp's top, walling off the surface that is supposed to be the way up.
-    """
+def test_the_landing_punches_the_l1_barrier(field):
+    """Stopping flush at x=2.5 would leave the perimeter barrier standing
+    across the ramp's top, walling off the way onto the slab."""
     g = field.grid("l1", "nav")
-    r, c = g.world_to_grid(2.51, 4.75)        # inside the barrier's 50 mm band
+    r, c = g.world_to_grid(2.51, 6.2)              # inside the barrier's 50 mm band
     assert not g.is_occupied(r, c)
 
 
-def test_ramp_carve_does_not_leak_past_its_own_rect(field):
+def test_the_carve_does_not_leak_past_its_own_rect(field):
     """Only the ramp is carved -- the rest of "off the L1 slab" stays a fall."""
     g = field.grid("l1", "nav")
-    for x, y in [(2.0, 2.0), (2.0, 7.5), (1.0, 4.75)]:
+    for x, y in [(2.0, 2.0), (2.0, 7.5), (1.0, 6.2)]:
         r, c = g.world_to_grid(x, y)
         assert g.is_occupied(r, c), f"({x}, {y}) should still be off-slab"
 
 
-def test_ramp_gate_contains_the_whole_carve():
-    """The Ramp gate rectangle must contain every point the carve can promote.
+def test_the_ramp_climbs_north_at_the_rulebook_gradient():
+    """[R] 3500 mm long against a 600 mm rise. That fixes the orientation as
+    well as the angle: 3500 mm of run does not fit in the 2500 mm of ground
+    west of the slab, so the ramp cannot climb in +x -- it runs north
+    alongside the slab. Inferring the axis instead got this wrong by 20 deg.
+    """
+    import math
+
+    from omni_sim_core.field.slope import SlopeField
+
+    spec = FieldSpec.from_yaml(SPEC)
+    for s in SlopeField.from_spec(spec).slopes:
+        assert s.axis == 1 and s.sign == 1.0, f"{s.name} should climb +y"
+        assert s.rise == pytest.approx(0.6)
+        assert s.angle_deg == pytest.approx(9.9, abs=0.15)
+        # the run is the horizontal leg of a 3500 mm slope
+        assert math.hypot(s.run, s.rise) == pytest.approx(3.5, abs=0.01)
+
+
+def test_ramp_gate_contains_the_l1_carve():
+    """The Ramp gate must contain every point the L1 carve can promote.
 
     resolve_level prefers the highest level whose grid is free at the centre,
-    so a centre standing anywhere on the carved ramp reads as "on L1" -- and
-    outside the gate that means its footprint is judged against L1 alone,
-    where everything off the 1.0 m strip is a fall. A robot at the ramp's
-    foot, safely on flat ground, then jams. The gate has to cover the carve
-    (plus _free_nearby's 1-cell tolerance) for that never to happen.
+    so a centre standing on an L1-carved cell reads as "on L1"; outside the
+    gate that means the footprint is judged against L1 alone, where everything
+    off the slab is a fall. With the landing-only carve that region is small,
+    but it still has to be covered -- plus _free_nearby's 1-cell tolerance.
     """
-    from omni_sim_core.ui.field_layout_2027 import RAMP_GATE_RECT_MM, RAMP_RECT_MM
+    from omni_sim_core.ui.field_layout_2027 import (RAMP_GATE_RECT_MM,
+                                                    RAMP_LANDING_MM)
 
     spec = FieldSpec.from_yaml(SPEC)
     carve = next(c for c in spec.connectors if c.name == "ramp_red")
+    assert carve.landing is not None
     gx0, gy0, gx1, gy1 = (v / 1000.0 for v in RAMP_GATE_RECT_MM)
-    cx0, cy0, cx1, cy1 = carve.rect
-    tol = spec.resolution                     # _free_nearby's radius_cells=1
+    cx0, cy0, cx1, cy1 = carve.landing
+    tol = spec.resolution
     assert gx0 <= cx0 - tol and gy0 <= cy0 - tol
     assert gx1 >= cx1 + tol and gy1 >= cy1 + tol
-    # ...and the drawn ramp and the carved ramp are the same rectangle
-    assert (cx0, cy0) == pytest.approx((RAMP_RECT_MM[0] / 1000.0,
-                                        RAMP_RECT_MM[1] / 1000.0))
+    assert (cx0, cy0) == pytest.approx((RAMP_LANDING_MM[0] / 1000.0,
+                                        RAMP_LANDING_MM[1] / 1000.0))

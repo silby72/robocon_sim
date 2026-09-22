@@ -78,23 +78,39 @@ geometry:
 # 600 mm wall from below and "off the slab is a fall" from above -- so no
 # ground->L1 plan can exist and the transition can only be faked.
 #
-# Each rect is carved FREE on BOTH layers it links, so the planner has one
-# connected corridor and the gate mechanism (ui/leveled_field_2027) owns the
-# genuinely ambiguous middle of the slope, where the robot is on neither floor.
+# GEOMETRY [R]: the rulebook gives the ramp as 3500 mm long against a 600 mm
+# rise, i.e. asin(600/3500) = 9.9 deg. That fixes the orientation as well as
+# the angle: 3500 mm of run does not fit between the field edge and the slab
+# (only 2500 mm of ground lies west of x=2500), so the ramp cannot climb in
+# +x. It runs NORTH alongside the slab's west edge -- 1000 mm wide, 3500 mm
+# long -- which is exactly the footprint this file always had. Only the climb
+# direction was being guessed, and guessed wrong: inferring it from "which
+# axis leaves the slab" reported 30.3 deg for a 9.9 deg ramp. Hence ``climb``
+# is now declared, not derived.
 #
-# The x1 values overshoot the slab edge (2500 / 8500) by 25 mm on purpose: that
-# is half the l1_barrier's 50 mm thickness, so the carve punches a doorway
-# through the barrier instead of leaving the ramp walled off at its top.
+# ``rect`` is carved FREE on the GROUND grid (the whole ramp is drivable from
+# below). ``landing`` is carved on L1 instead, because a ramp is level with
+# the slab only at its top; carving the full footprint there would let a robot
+# step onto L1 from any height part-way up. The landing's x1 overshoots the
+# slab edge (2500) by 25 mm on purpose -- half the l1_barrier's 50 mm
+# thickness -- so the carve punches a doorway through the barrier rather than
+# leaving the ramp top walled off.
 #
-# CAUTION [F]: matching field_layout_2027.RAMP_RECT_MM, this is 1000 mm of run
-# for 600 mm of rise -- a 31 deg slope, far too steep to actually drive. Either
-# the run or the rise is wrong in the figure this was scaled from; the topology
-# (climb in +x, 3500 mm wide in y) is what every consumer assumes. Replace with
-# the real dimensions when CAD lands -- the shallow-ramp case needs the run
-# extended westward, not the width changed.
+# [A] the climb *direction* (north, foot at y=3000): the Start Zone is south
+# and the Transfer Area straddles the L1 edge at y 3000..4000 at ground level,
+# both of which put the foot at the south end. Flip ``climb`` to "-y" and move
+# ``landing`` to the south end if the real layout is the other way round.
 connectors:
-  - {name: ramp_red,  rect: [1500, 3000, 2525, 6500], links: [ground, l1]}
-  - {name: ramp_blue, rect: [8475, 3000, 9500, 6500], links: [ground, l1]}
+  - name: ramp_red
+    rect:    [1500, 3000, 2500, 6448]   # 1000 wide, 3448 of run (3500 on the slope)
+    landing: [1500, 5548, 2525, 6448]   # top 900 mm + the doorway through the barrier
+    links:   [ground, l1]
+    climb:   "+y"
+  - name: ramp_blue
+    rect:    [8500, 3000, 9500, 6448]
+    landing: [8475, 5548, 9500, 6448]
+    links:   [ground, l1]
+    climb:   "+y"
 
 # Numbers the rulebook does not fix -> swept (依頼 §5). Values in mm.
 unknowns:

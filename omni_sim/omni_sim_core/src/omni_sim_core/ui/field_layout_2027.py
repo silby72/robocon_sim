@@ -30,9 +30,20 @@ L1_RECT_MM = (2500, 2500, CENTER_X_MM, 8500)           # [R] size; red half, mir
 L2_RECT_MM = (4000, 4000, 7000, 7000)                  # [R] size, [F] centred on field
 GROUND_SHARED_RECT_MM = (4900, 400, 6100, 1600)        # [R] size, [F] south-centre position
 MUSTIKA_SHARED_RECT_MM = (5000, 7500, 6000, 8500)      # [R] size/position (matches the L1 notch)
-RAMP_RECT_MM = (1500, 3000, 2500, 6500)                # [R] 3500 length, [F] pos/width; red, mirror for blue
+RAMP_RECT_MM = (1500, 3000, 2500, 6448)                # [R] 3500 long on the slope, 600 rise -> 9.9 deg
+RAMP_LANDING_MM = (1500, 5548, 2525, 6448)             # where it is level with L1 (see the field spec)
 L1_SHARED_STRIP_MM = (4700, 2500, 6300, 8500)          # [A] "boundary between Red/Blue L1"; 1600 wide
 STAIRS_GATE_RECT_MM = (4700, 3700, 6300, 4300)         # [A] L1<->L2 crossing, straddles L2's south edge
+
+# Task areas. Named here rather than left inline in _zones() because the match
+# phase (ui/phase.py) is read off them: "where the robot is" and "what it is
+# drawn standing on" must not be two different sets of numbers.
+START_RECTS_MM = ((300, 300, 1000, 1000), (1100, 300, 1800, 1000))  # [R] size, [F] pos
+STORAGE_RECT_MM = (300, 9000, 1300, 11000)             # [R] size, [F] corner pos
+TRANSFER_RECT_MM = (2000, 3000, 3000, 4000)            # [R] size, [F] straddles the L1 edge
+L1_RETRY_RECT_MM = (3000, 6700, 3700, 7400)            # [R] size, [F] north of the team's L1
+BUILDING_SPOTS_MM = ((3500, 3500), (7500, 3500), (5500, 3500))      # [F] centres, 500 sq
+L2_BUILDING_SPOT_MM = (5250, 4250, 5750, 4750)         # [F] the L2 spot
 
 # The functional crossing gates (leveled_field_2027.resolve_level) are more
 # generous than the rectangles drawn on screen, but *only* in the direction
@@ -65,10 +76,16 @@ _GATE_MARGIN_MM = 700
 # _free_nearby's 1-cell = 20 mm tolerance), not the 700 mm that the docstring
 # in leveled_field_2027.resolve_level warns about.
 _RAMP_CARVE_SLACK_MM = 100
-RAMP_GATE_RECT_MM = (RAMP_RECT_MM[0] - _RAMP_CARVE_SLACK_MM,
-                     RAMP_RECT_MM[1] - _RAMP_CARVE_SLACK_MM,
-                     RAMP_RECT_MM[2] + _GATE_MARGIN_MM,
-                     RAMP_RECT_MM[3] + _RAMP_CARVE_SLACK_MM)
+# The gate must contain the whole area carved FREE on L1 -- which is now the
+# *landing*, not the whole ramp. resolve_level's fallback reads any centre
+# standing on an L1-free cell as being on L1; while the robot is still on the
+# sloped part, only the ground grid clears it, so it is correctly "on ground"
+# with no gate involved. The crossing that needs both levels in play is the
+# short move EAST off the landing onto the slab, so the margin goes on +x.
+RAMP_GATE_RECT_MM = (RAMP_LANDING_MM[0] - _RAMP_CARVE_SLACK_MM,
+                     RAMP_LANDING_MM[1] - _RAMP_CARVE_SLACK_MM,
+                     RAMP_LANDING_MM[2] + _GATE_MARGIN_MM,
+                     RAMP_LANDING_MM[3] + _RAMP_CARVE_SLACK_MM)
 STAIRS_GATE_MARGIN_MM = (STAIRS_GATE_RECT_MM[0], STAIRS_GATE_RECT_MM[1] - _GATE_MARGIN_MM,
                          STAIRS_GATE_RECT_MM[2], STAIRS_GATE_RECT_MM[3] + _GATE_MARGIN_MM)
 
@@ -114,14 +131,12 @@ def _zones() -> list[tuple[str, tuple, tuple, float, str | None]]:
     z.append(("rect", MUSTIKA_SHARED_RECT_MM, _C["shared"], 1, None))          # [R] size/pos (matches L1 notch)
 
     # --- Storage Area 1000x2000, [F] corner near the north edge -----------
-    storage_red = (300, 9000, 1300, 11000)                                    # [R] size, [F] pos
+    storage_red = STORAGE_RECT_MM
     z.append(("rect", storage_red, _C["ground_red"], 1, "Storage"))
     z.append(("rect", _mirror(storage_red), _C["ground_blue"], 1, None))
 
     # --- Start Zone / Ground Retry Zone: two 700x700 boxes, [F] SW corner --
-    start_a = (300, 300, 1000, 1000)                                          # [R] size, [F] pos
-    start_b = (1100, 300, 1800, 1000)
-    for box in (start_a, start_b):
+    for box in START_RECTS_MM:
         z.append(("rect", box, _C["retry_red"], 2, None))
         z.append(("rect", _mirror(box), _C["retry_blue"], 2, None))
     z.append(("text", ((650 + 1450) / 2, 150), None, 2.5, "Start / Retry"))
@@ -137,7 +152,7 @@ def _zones() -> list[tuple[str, tuple, tuple, float, str | None]]:
     z.append(("rect", L1_SHARED_STRIP_MM, _C["shared"], 3.5, None))            # [A] width; outlined below
 
     # --- L1 Retry Zone 700x700, [F] north part of each team's L1 half ------
-    l1_retry_red = (3000, 6700, 3700, 7400)                                   # [R] size, [F] pos
+    l1_retry_red = L1_RETRY_RECT_MM
     z.append(("rect", l1_retry_red, _C["retry_red"], 4, None))
     z.append(("rect", _mirror(l1_retry_red), _C["retry_blue"], 4, None))
 
@@ -145,7 +160,7 @@ def _zones() -> list[tuple[str, tuple, tuple, float, str | None]]:
     z.append(("rect", RAMP_RECT_MM, _C["ramp_red"], 2, "Ramp"))
     z.append(("rect", _mirror(RAMP_RECT_MM), _C["ramp_blue"], 2, None))
 
-    transfer_red = (2000, 3000, 3000, 4000)                                   # [R] size, [F] pos (straddles L1 edge)
+    transfer_red = TRANSFER_RECT_MM
     z.append(("rect", transfer_red, _C["transfer_red"], 5, "Transfer"))
     z.append(("rect", _mirror(transfer_red), _C["transfer_blue"], 5, None))
 
@@ -157,10 +172,10 @@ def _zones() -> list[tuple[str, tuple, tuple, float, str | None]]:
     z.append(("rect", STAIRS_GATE_RECT_MM, _C["l1_red"], 6.2, "Stairs"))       # [A] position
 
     # --- Building Spots (500x500), [F] positions -----------------------------
-    for cx, cy in ((3500, 3500), (7500, 3500), (5500, 3500)):
+    for cx, cy in BUILDING_SPOTS_MM:
         z.append(("rect", (cx - 250, cy - 250, cx + 250, cy + 250),
                   _C["building_spot"], 5, None))
-    z.append(("rect", (5250, 4250, 5750, 4750), _C["building_spot"], 7, None))  # L2 spot
+    z.append(("rect", L2_BUILDING_SPOT_MM, _C["building_spot"], 7, None))  # L2 spot
 
     # --- Pillars --------------------------------------------------------
     z.append(("circle", (CENTER_X_MM, 8000, 270), _C["pillar"], 4.5, None))    # Mustika Pillar (ground)

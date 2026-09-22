@@ -51,6 +51,51 @@ class ConnectorSpec:
     name: str
     rect: tuple[float, float, float, float]   # (x0,y0,x1,y1) [m]
     links: tuple[str, ...]                    # layer names to carve it FREE on
+    # Which way is uphill: "+x" / "-x" / "+y" / "-y". Declared, because
+    # inferring it is not reliable -- see climb_axis.
+    climb: str | None = None
+    # Where the ramp meets the upper layer. Carved FREE on the upper layer
+    # *instead of* the whole rect: a ramp is only level with the slab at its
+    # top, so carving its full footprint there let a robot step onto L1 from
+    # any height part-way up.
+    landing: tuple[float, float, float, float] | None = None
+
+    def climb_axis(self, layers: dict[str, "LayerSpec"]) -> tuple[int, float]:
+        """``(axis, sign)``: which way is uphill. 0 = x, 1 = y; sign +-1.
+
+        Taken from ``climb`` when declared. The fallback infers it from the one
+        thing that usually distinguishes the two ends -- a ramp *leaves* the
+        upper slab, so along the climbing axis most of the rectangle lies
+        outside the upper layer's extent while the other axis lies inside it.
+
+        That inference is wrong for a ramp that runs *alongside* the slab
+        rather than away from it, which is exactly the 2027 ramp: 1000 mm wide
+        against the slab's west edge, 3500 mm long north-south. It read the
+        width as the run and reported a 30 degree slope for a 10 degree ramp.
+        Declare ``climb`` and the guess never happens.
+        """
+        if self.climb is not None:
+            axis = {"x": 0, "y": 1}[self.climb[-1]]
+            return axis, (-1.0 if self.climb[0] == "-" else 1.0)
+        upper = max((layers[n] for n in self.links), key=lambda l: l.floor_z)
+        if upper.extent is None:
+            raise ValueError(f"connector {self.name!r} links no raised layer")
+        fractions = []
+        for axis in (0, 1):
+            lo, hi = self.rect[axis], self.rect[axis + 2]
+            elo, ehi = upper.extent[axis], upper.extent[axis + 2]
+            span = max(hi - lo, 1e-9)
+            fractions.append(max(0.0, min(hi, ehi) - max(lo, elo)) / span)
+        axis = 0 if fractions[0] < fractions[1] else 1
+        if abs(fractions[0] - fractions[1]) < 1e-9:
+            raise ValueError(
+                f"connector {self.name!r}: cannot tell which way is uphill "
+                "(it overlaps the upper slab equally on both axes)")
+        lo, hi = self.rect[axis], self.rect[axis + 2]
+        elo, ehi = upper.extent[axis], upper.extent[axis + 2]
+        # uphill is the end that reaches into the upper slab
+        sign = 1.0 if abs(hi - elo) < abs(lo - ehi) else -1.0
+        return axis, sign
 
 
 @dataclass
@@ -96,7 +141,10 @@ class FieldSpec:
         connectors = tuple(
             ConnectorSpec(name=c["name"],
                           rect=tuple(float(v) * to_m for v in c["rect"]),
-                          links=tuple(c["links"]))
+                          links=tuple(c["links"]),
+                          climb=c.get("climb"),
+                          landing=(None if c.get("landing") is None else
+                                   tuple(float(v) * to_m for v in c["landing"])))
             for c in cfg.get("connectors", []))
 
         return cls(size=size, resolution=res, origin=origin, layers=layers,

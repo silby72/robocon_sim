@@ -47,24 +47,26 @@ LEVEL_ORDER = ("ground", "l1", "l2")
 # neither floor -- so it is covered by the gate rectangles instead.
 #
 # These are not free parameters. Each is pinned to the measured free band of
-# the level it belongs to at the real chassis radius (r_circ 0.636 m for the
-# 0.9 m square), so they move if the chassis or the field spec changes:
+# the level it belongs to at the rule-limit chassis (700 mm square, r_circ
+# 0.495 m), so they move if the chassis or the field spec changes. Re-measure
+# with ``scripts/measure_corridors.py`` after changing either.
 #
-#   ramp, ground side  x <= 1.889   (L1 slab wall at 2.525, minus r_circ)
-#   ramp, L1 side      x >= 2.136   (ramp's west end at 1.500, plus r_circ)
-#   stairs, L1 side    y in [3.136, 3.364] and x <= 4.864
-#                      (the L1 ring: 1.5 m between the L1 and L2 slab edges,
-#                       leaving 0.228 m after inflating both sides; its east
-#                       end is where the divider_l1 fence stub blocks it)
-#   stairs, L2 side    y >= 4.636   (L2 slab edge at 4.000, plus r_circ)
+# The ramp pair sits at the TOP of the ramp, both inside the Ramp gate, with
+# the stitched leg running east across the slab edge. The ramp climbs north
+# (see the field spec): the sloped part is cleared only on the ground grid, so
+# a robot part-way up is simply "on ground" and needs no gate. The one move
+# that needs both levels in play is stepping off the landing onto the slab.
 #
-# The stairs pair sits at x=4.8 rather than the gate's centre x=5.5 for that
-# last reason: the centre divider fence makes the middle of the ring lethal,
-# so the only reachable part of the Stairs gate is its western sliver.
-# Re-measure with ``scripts/measure_corridors.py`` after changing either.
+#   ramp, ground side  x in [1.995, 2.005] at the top     (1000 mm ramp, r_circ 0.495)
+#   ramp, L1 side      x >= 2.995                         (slab edge 2.500 + r_circ)
+#   stairs, L1 side    y in [3.00, 3.52] at x = 4.8       (the L1 ring south of L2)
+#   stairs, L2 side    y >= 4.495                         (L2 slab edge 4.000 + r_circ)
+#
+# The stairs pair sits at x = 4.8 rather than the gate's centre x = 5.5: the
+# divider_l1 fence stub narrows the ring to 40 mm there.
 _RAMP_WAYPOINTS_M = {
-    "red": ((1.8, 4.75), (2.4, 4.75)),
-    "blue": ((9.2, 4.75), (8.6, 4.75)),
+    "red": ((2.0, 6.0), (3.2, 6.0)),
+    "blue": ((9.0, 6.0), (7.8, 6.0)),
 }
 _STAIRS_WAYPOINTS_M = ((4.8, 3.25), (4.8, 4.70))
 

@@ -1,0 +1,39 @@
+# Drivetrain selection sweep.
+#
+# There is no chassis concept yet -- only "4-wheel omni" is decided -- so mass
+# is swept too rather than assumed. The question this answers is which
+# (gear ratio, wheel radius) combinations can meet the requirements at all,
+# and over what mass range.
+#
+# Gazebo's VelocityControl / DiffDrive plugins turn a velocity command straight
+# into body motion, without passing through torque, inertia or friction. They
+# therefore cannot answer "can that motor at that gear ratio actually produce
+# that speed and climb that ramp". That is what this sweep is for.
+name: drivetrain_selection
+
+parameters:
+  gear_ratio:    {range: [1.0, 6.0], step: 0.2}            # 26 points, motor:wheel
+  wheel_radius:  {values: [0.038, 0.050, 0.063, 0.075]}    # 1.5" / 2" / 2.5" / 3"
+  total_mass_kg: {range: [5, 30], step: 2.5}               # 11 points
+
+parallel: 8
+seed: 42
+
+metrics:
+  - v_max_diag          # sustainable top speed on the diagonal [m/s]
+  - climb_deg_at_speed  # steepest slope it can climb while moving [deg]
+  - track_err_dob       # worst position error under a load step, DOB on [m]
+  - track_err_nodob     # ...and with it off [m]
+
+# Requirements (仮値 -- provisional, revise when the machine concept exists).
+requirements:
+  v_max_diag_min: 1.0        # m/s
+  v_max_diag_max: 1.5        # m/s (above this is not a failure, just unused)
+  ramp_deg: 9.9              # [R] asin(600/3500), see config/field/robocon2027.yaml
+  track_err_max: 0.15        # m, under a load step
+
+# The load step the tracking metric applies: a TR picking up cargo mid-run.
+load_step:
+  task_distance_m: 2.0
+  steps: [1.6, 2.2]          # mass multipliers applied in order
+  at_fraction: [0.3, 0.6]    # ...at these fractions of the run

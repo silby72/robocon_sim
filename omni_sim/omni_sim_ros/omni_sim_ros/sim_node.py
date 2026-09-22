@@ -75,10 +75,26 @@ class SimNode(Node):
         seed = int(self.get_parameter("seed").value)
 
         clk = ClockConfig(dt_sim=dt_sim, dt_motor=dt_motor, dt_nav=dt_nav)
-        self.sim = RobotSim(RobotConfig(clock=clk), seed=seed)
+        # The robot this node simulates comes from config/robot/* -- the files
+        # the GUI's chassis and actuator pages edit -- not from RobotConfig()'s
+        # library defaults. Those defaults describe an idealised 10 kg machine
+        # with four ungeared wheels 0.2 m from its centre; the configured robot
+        # is 15 kg with 6:1 gearboxes at 0.62 m, and for a 1 m/s command the
+        # two disagree about motor speed by 5.9x. Simulating the defaults meant
+        # every gain was tuned against a robot that does not exist.
+        self.declare_parameter("chassis_yaml", "")
+        chassis_yaml = self._resolve_repo_file(
+            str(self.get_parameter("chassis_yaml").value), "config/robot/chassis.yaml")
+        self.declare_parameter("use_configured_robot", True)
+        self._seed = seed
+        self._chassis_yaml = chassis_yaml
+        self._robot_base = (str(Path(chassis_yaml).resolve().parents[2])
+                            if chassis_yaml else "")
+        self._motor_preset: str | None = None   # None = whatever the config says
+        self.sim = RobotSim(self._robot_config(chassis_yaml, clk), seed=seed)
 
         self.declare_parameter("team", "red")
-        team = str(self.get_parameter("team").value)
+        team = self.team = str(self.get_parameter("team").value)
 
         map_yaml = self.get_parameter("map_yaml").value
         self._leveled = None
@@ -141,29 +157,23 @@ class SimNode(Node):
         # below uses the real rotated rectangle. r_circ therefore comes from
         # the chassis, not a guess -- a 0.9 m square's circumscribed radius is
         # 0.64 m, so the old hard-coded 0.45 was under-inflating every plan.
-        self.declare_parameter("chassis_yaml", "")
-        chassis_yaml = self._resolve_repo_file(
-            str(self.get_parameter("chassis_yaml").value), "config/robot/chassis.yaml")
         self._footprint = self._load_footprint(chassis_yaml)
         default_r = self._footprint.r_circ if self._footprint is not None else 0.45
+        self._planner_r_default = float(default_r)
         self.declare_parameter("planner_r_circ", float(default_r))
-        plan_cfg = PlanConfig(r_circ=float(self.get_parameter("planner_r_circ").value))
-        if self._leveled is not None:
-            # Plan on the territory-masked grids, judge with the raw ones: the
-            # opponent's half is a rule, not an obstacle, so it exists only in
-            # is_blocked() unless it is stamped in here too. See
-            # LeveledField.territory_masked_grid for what that cost.
-            self._planners = {
-                lvl: GridPlanner(CostField(self._leveled.territory_masked_grid(lvl),
-                                           plan_cfg))
-                for lvl in self._leveled.grids}
-        else:
-            self._planners = {"ground": GridPlanner(CostField(self.grid, plan_cfg))}
+        self._build_planners()
 
         # trajectory-following params: same defaults experiments/live_view.py
         # uses, which is where this PID + trapezoidal-profile combination was
         # actually tuned against this robot's dynamics.
-        self.declare_parameter("traj_v_max", 1.2)
+        # Default v_max from what the drivetrain can actually hold, not a
+        # round number. It was 1.2 m/s against a configured M3508 drivetrain
+        # good for about 0.36 m/s on the diagonal: every trajectory asked for
+        # 3x the speed the robot had, the follower fell permanently behind,
+        # and the run was abandoned metres short of the goal. The diagonal is
+        # the binding direction -- with drive axes at +-45 deg, moving that way
+        # runs two wheels at full speed while the other two idle.
+        self.declare_parameter("traj_v_max", self._drivetrain_v_max(default=1.2))
         self.declare_parameter("traj_a_max", 1.5)
         self.declare_parameter("traj_a_lat_max", 2.0)
         self.declare_parameter("traj_kp", 2.0)
@@ -214,6 +224,8 @@ class SimNode(Node):
             "config/field/robocon2027.yaml")
         self.pub_scene = self.create_publisher(String, "/sim/scene", 1)
         self.pub_state = self.create_publisher(String, "/sim/state", 10)
+        self._field_yaml = field_yaml
+        self._slopes = self._load_slopes(field_yaml)
         self._scene_json = self._build_scene(field_yaml, chassis_yaml, team)
         # Re-published on a timer rather than latched: rosbridge bridges a
         # browser subscription with its own QoS, and a transient-local
@@ -221,8 +233,17 @@ class SimNode(Node):
         # opened after the node started would render an empty field forever.
         self.create_timer(2.0, self._publish_scene)
         self._last_state_pub = -1.0
+        from omni_sim_core.ui.phase import PhaseTracker
+        self._control = PhaseTracker()
+        self._phase = PhaseTracker()
+        self._planning = False          # true only inside _on_goal_pose
+        self._last_outcome: str | None = None
 
         self.create_subscription(Twist, "/cmd_vel", self._on_cmd_vel, 10)
+        self.create_subscription(String, "/sim/set_motor",
+                                 self._on_set_motor, 1)
+        self.create_subscription(String, "/sim/reload_robot",
+                                 self._on_reload_robot, 1)
         self.create_subscription(PoseStamped, "/goal_pose", self._on_goal_pose, 10)
         self.create_subscription(Float64MultiArray, "/sim/wheel_torque_cmd",
                                  self._on_wheel_torque, 10)
@@ -239,6 +260,7 @@ class SimNode(Node):
         self._ext_wrench = np.zeros(3)
         self._paused = False
         self._prev_twist_world = np.zeros(3)
+        self._gyro_wz: float | None = None
         self._pub_counts = {"scan": 0, "imu": 0, "joint": 0, "odom": 0}
         self._steps_per_tick = max(1, int(round(self.rtf * self.wall_tick / dt_sim))) \
             if self.rtf > 0 else int(round(self.wall_tick / dt_sim))
@@ -255,6 +277,41 @@ class SimNode(Node):
         self.create_timer(self.wall_tick, self._on_tick)
         self.get_logger().info(
             f"omni_sim started: rtf={self.rtf}, {self._steps_per_tick} steps/tick")
+
+    def _build_planners(self) -> None:
+        """(Re)build the inflated cost fields A* plans on.
+
+        Rebuilt on reload, not just at startup: the inflation radius comes from
+        the chassis, so a footprint edit that is not followed through to here
+        leaves the planner routing a body it no longer has -- through gaps the
+        real robot would now be judged too wide for. That is the same class of
+        bug as the collision rectangle not reloading, one layer up, and it
+        fails in the more confusing direction (a plan that looks fine and then
+        jams).
+
+        ``planner_r_circ`` still wins if it was set explicitly; it defaults to
+        the chassis value, so leaving it alone tracks the chassis.
+        """
+        r_circ = float(self.get_parameter("planner_r_circ").value)
+        if self._footprint is not None:
+            declared = self.get_parameter("planner_r_circ")
+            # only track the chassis when the user did not pin the value
+            if abs(declared.value - self._planner_r_default) < 1e-12:
+                r_circ = self._footprint.r_circ
+        self._planner_r_default = r_circ
+        plan_cfg = PlanConfig(r_circ=r_circ)
+        if self._leveled is not None:
+            # Plan on the territory-masked grids, judge with the raw ones: the
+            # opponent's half is a rule, not an obstacle, so it exists only in
+            # is_blocked() unless it is stamped in here too. See
+            # LeveledField.territory_masked_grid for what that cost.
+            self._planners = {
+                lvl: GridPlanner(CostField(self._leveled.territory_masked_grid(lvl),
+                                           plan_cfg))
+                for lvl in self._leveled.grids}
+        else:
+            self._planners = {"ground": GridPlanner(CostField(self.grid, plan_cfg))}
+        self.get_logger().info(f"planner inflation r_circ {r_circ:.3f} m")
 
     def _resolve_repo_file(self, given: str, rel: str) -> str:
         """``given`` if set, else ``rel`` under the repo the map came from.
@@ -276,11 +333,234 @@ class SimNode(Node):
             return str(cand)
         return ""
 
+    def _robot_config(self, chassis_yaml: str, clk: ClockConfig) -> RobotConfig:
+        """The configured robot, or the library defaults if it cannot be read.
+
+        Falling back rather than failing keeps ``ros2 run`` with no arguments
+        working, but it is logged loudly: a silent fallback here is exactly how
+        the node spent its life simulating the wrong machine.
+        """
+        if not chassis_yaml or not self.get_parameter("use_configured_robot").value:
+            self.get_logger().warn(
+                "simulating RobotConfig() defaults, NOT config/robot/* "
+                "(no chassis_yaml, or use_configured_robot:=false)")
+            return RobotConfig(clock=clk)
+        try:
+            from omni_sim_core.mechanism.robot_config import (describe,
+                                                              robot_config_from_dir)
+            base = Path(chassis_yaml).resolve().parents[2]
+            cfg, warnings = robot_config_from_dir(base, clock=clk)
+        except Exception as exc:
+            self.get_logger().error(
+                f"could not build the robot from {chassis_yaml}: {exc} -- "
+                "falling back to RobotConfig() defaults, which are NOT your robot")
+            return RobotConfig(clock=clk)
+        self.get_logger().info(f"simulating {describe(cfg)} (from {base}/config/robot)")
+        for msg in warnings.messages:
+            self.get_logger().warn(f"robot config: {msg}")
+        return cfg
+
+    def _load_slopes(self, field_yaml: str):
+        """The ramps, as inclines, plus whether this robot can get up them."""
+        if not field_yaml:
+            return None
+        try:
+            from omni_sim_core.field.slope import SlopeField
+            from omni_sim_core.field.spec import FieldSpec
+            slopes = SlopeField.from_spec(FieldSpec.from_yaml(field_yaml))
+        except Exception as exc:
+            self.get_logger().warn(f"no slope model: {exc}")
+            return None
+        for line in slopes.describe():
+            self.get_logger().info(f"ramp: {line}")
+
+        # What the drivetrain can hold and what it can climb, against what the
+        # ramp asks. Both, because they are different questions: holding uses
+        # stall torque, climbing uses the torque still available at speed, and
+        # a weak motor can pass the first and fail the second.
+        try:
+            from omni_sim_core.mechanism.robot_config import climb_limits
+            # At the speed it will actually attempt, not some token crawl: the
+            # available torque falls with speed, so a drivetrain that climbs
+            # the ramp at 0.1 m/s can be quite unable to climb it at the 2 m/s
+            # its own speed profile plans for. Asking about the planned speed
+            # is the only version of the question that predicts the run.
+            lim = climb_limits(self.sim.cfg, climb_speed=self._traj_v_max)
+        except Exception as exc:
+            self.get_logger().warn(f"no climb estimate: {exc}")
+            return slopes
+        best = max((s.angle_deg for s in slopes.slopes), default=0.0)
+        msg = (f"drivetrain holds {lim['hold_deg']:.0f} deg at rest "
+               f"({lim['push_hold_n']:.0f} N) and climbs {lim['climb_deg']:.0f} deg "
+               f"at {lim['climb_speed']:.2f} m/s ({lim['push_climb_n']:.0f} N), "
+               f"{self.sim.cfg.body.mass_kg:.0f} kg; steepest ramp {best:.1f} deg")
+        ok = lim["climb_deg"] >= best
+        # Two call sites, not one ternary: rclpy caches a logger's severity
+        # per call location and raises "Logger severity cannot be changed
+        # between calls" if the same line ever logs at two levels. The node
+        # died outright the first time a motor swap turned this warning on.
+        if ok:
+            self.get_logger().info(msg)
+        else:
+            self.get_logger().warn(msg)
+        if not ok:
+            self.get_logger().warn(
+                "this drivetrain cannot climb the ramp -- expect it to stall "
+                "at the foot rather than fail loudly")
+        return slopes
+
+    def _level_floor_z(self) -> float:
+        """Floor height to report when the robot is not on a ramp.
+
+        Read off whichever level's grid actually accepts the position, not the
+        *committed* level. The two differ for the length of a gate: leaving the
+        ramp's top at x = 2.53 the robot is standing on the L1 slab, but the
+        commit waits until its centre clears the gate at x = 3.2 -- so keying
+        the height off the committed level reported a robot at the top of a
+        600 mm ramp as being at z = 0. Committed level is a *rule* (it governs
+        collision and transitions); height is a readout, and the readout should
+        say where the robot is.
+        """
+        level = self._cur_level
+        if self._leveled is not None:
+            pose = self.sim.body.pose
+            level = self._leveled.level_of(float(pose[0]), float(pose[1]))
+        return {"ground": 0.0, "l1": 0.6, "l2": 0.9}.get(level, 0.0)
+
+    def _slope_wrench(self) -> np.ndarray:
+        """Body-frame gravity from the ramp under the robot, if any."""
+        if self._slopes is None:
+            return self._ext_wrench
+        pose = self.sim.body.pose
+        return self._ext_wrench + self._slopes.gravity_wrench_body(
+            float(pose[0]), float(pose[1]), float(pose[2]),
+            self.sim.cfg.body.mass_kg)
+
+    def _drivetrain_v_max(self, default: float) -> float:
+        """Slowest sustainable body speed over the directions that matter."""
+        if not self.sim.cfg.enforce_motor_envelope:
+            return default
+        try:
+            from omni_sim_core.mechanism.robot_config import achievable_speed
+            v = min(achievable_speed(self.sim.cfg, d)
+                    for d in ((1, 0, 0), (0, 1, 0), (1, 1, 0), (1, -1, 0)))
+        except Exception as exc:
+            self.get_logger().warn(f"could not size v_max from the drivetrain: {exc}")
+            return default
+        if v <= 0.05:
+            self.get_logger().error(
+                f"the drivetrain sustains only {v:.3f} m/s -- keeping v_max "
+                f"{default} m/s, but nothing will track")
+            return default
+        self.get_logger().info(f"trajectory v_max {v:.3f} m/s (from the drivetrain)")
+        return float(v)
+
+    def _motor_block(self) -> dict | None:
+        """What the dashboard needs to offer a drivetrain swap."""
+        if not self._robot_base:
+            return None
+        try:
+            from omni_sim_core.mechanism.robot_config import (
+                available_motor_presets, drivetrain_preset)
+            return {
+                "available": available_motor_presets(self._robot_base),
+                "configured": drivetrain_preset(self._robot_base),
+                "current": self._motor_preset or drivetrain_preset(self._robot_base),
+                "kt": round(float(self.sim.cfg.motor.torque_constant_nm_a), 4),
+                "resistance": round(float(self.sim.cfg.motor.resistance_ohm), 3),
+            }
+        except Exception as exc:
+            self.get_logger().warn(f"could not list motor presets: {exc}")
+            return None
+
+    def _on_set_motor(self, msg: String) -> None:
+        """Swap the drive motor: a reload with one field overridden."""
+        preset = msg.data.strip()
+        if not preset:
+            self.get_logger().warn("/sim/set_motor got an empty preset name")
+            return
+        self._rebuild_robot(motor_preset=preset, why=f"drive motor -> {preset}")
+
+    def _on_reload_robot(self, msg: String) -> None:
+        """Re-read config/robot/* and rebuild the robot in place.
+
+        The GUI's chassis and actuator pages write those files; without this
+        the only ways to pick an edit up were restarting the node or swapping
+        the motor, which happened to reload everything as a side effect. Relying
+        on a side effect for the main path is how the collision footprint ended
+        up reloading on a motor swap but not otherwise.
+        """
+        self._rebuild_robot(motor_preset=self._motor_preset,
+                            why="reloaded config/robot")
+
+    def _rebuild_robot(self, *, motor_preset: str | None, why: str) -> None:
+        """Rebuild the plant from config/robot/*, keeping the pose.
+
+        The pose survives on purpose: the point of a rebuild is usually to
+        re-run the same manoeuvre from the same place and compare, which a
+        reset to the start corner would make needlessly awkward. Everything
+        dynamic does *not* survive -- motor state, the follower, the collision
+        bookkeeping -- so the new robot starts from rest rather than inheriting
+        momentum the old one's actuators produced.
+        """
+        if not self._robot_base:
+            self.get_logger().warn("cannot rebuild: no config/robot found")
+            return
+        before = (self._footprint.length if self._footprint else None,
+                  round(float(self.sim.cfg.body.mass_kg), 3))
+        pose = self.sim.body.pose.copy()
+        clk = self.sim.clock.config
+        try:
+            from omni_sim_core.mechanism.robot_config import (describe,
+                                                              robot_config_from_dir)
+            cfg, warnings = robot_config_from_dir(self._robot_base, clock=clk,
+                                                  motor_preset=motor_preset)
+        except Exception as exc:
+            self.get_logger().error(
+                f"rebuild failed ({why}): {exc} -- keeping the running robot")
+            return
+        self.sim = RobotSim(cfg, seed=self._seed)
+        self.sim.reset(pose=pose)
+        self._motor_preset = motor_preset
+        self._follower = None
+        self._cmd_vel = np.zeros(3)
+        self._wheel_torque_cmd = None
+        self._safe_pose = pose.copy()
+        self._checked_pose = pose.copy()
+        self._prev_twist_world = np.zeros(3)
+        # Re-size the speed profile: a faster motor that keeps planning at the
+        # old one's top speed wastes it, and a slower one that keeps the old
+        # figure plans trajectories it cannot follow -- which is the failure
+        # this whole item started from.
+        self._traj_v_max = self._drivetrain_v_max(default=self._traj_v_max)
+        self._slopes = self._load_slopes(self._field_yaml)
+        # Reload the collision rectangle too. robot_config_from_dir re-reads
+        # chassis.yaml, so a swap already picks up any footprint edit made in
+        # the GUI since startup -- and the drawing (_build_scene, below) picks
+        # it up as well. Leaving _footprint behind meant the robot could end up
+        # drawn and simulated at the new size while being *judged* at the old
+        # one, which is the worst of the three to have disagree.
+        self._footprint = self._load_footprint(self._chassis_yaml)
+        self._build_planners()
+        self._scene_json = self._build_scene(self._field_yaml, self._chassis_yaml,
+                                             self.team)
+        self._publish_scene()
+        self.get_logger().info(f"{why}: {describe(cfg)}")
+        after = (self._footprint.length if self._footprint else None,
+                 round(float(self.sim.cfg.body.mass_kg), 3))
+        if after != before:
+            self.get_logger().info(
+                f"  footprint {before[0]} -> {after[0]} m, "
+                f"mass {before[1]} -> {after[1]} kg")
+        for m in warnings.messages:
+            self.get_logger().warn(f"robot config: {m}")
+
     def _build_scene(self, field_yaml: str, chassis_yaml: str, team: str) -> str:
         try:
             from omni_sim_core.ui.web_scene import scene_json
             js = scene_json(field_yaml=field_yaml or None,
-                            chassis_yaml=chassis_yaml or None, team=team)
+                            chassis_yaml=chassis_yaml or None, team=team,
+                            motors=self._motor_block())
         except Exception as exc:
             self.get_logger().warn(f"could not build /sim/scene: {exc}")
             return ""
@@ -308,7 +588,35 @@ class SimNode(Node):
             return
         self._last_state_pub = t
         pose = self.sim.body.pose
+
+        from omni_sim_core.ui.phase import control_state, match_phase
+        # "held" is the governed follower waiting for the robot rather than
+        # running away from it -- the state that used to be invisible right up
+        # until the run was abandoned.
+        held = bool(self._follower is not None and self._traj_stalled > 0.0)
+        ctrl = control_state(
+            following=self._follower is not None, planning=self._planning,
+            blocked=self._blocked, held=held,
+            manual=(self._follower is None
+                    and (self._wheel_torque_cmd is not None
+                         or bool(np.any(self._cmd_vel)))),
+            last_outcome=self._last_outcome)
+        self._control.update(t, ctrl)
+        self._phase.update(t, match_phase(float(pose[0]), float(pose[1]),
+                                          self._cur_level, self.team))
+
+        slope = (self._slopes.at(float(pose[0]), float(pose[1]))
+                 if self._slopes is not None else None)
         self.pub_state.publish(String(data=json.dumps({
+            "control": self._control.as_dict(),
+            "phase": self._phase.as_dict(),
+            # height and pitch are reported, not integrated: the rigid body is
+            # still planar. They are what a viewer shows and what a tipping
+            # check would read.
+            "z": round(slope.height_at(float(pose[0]), float(pose[1])), 4)
+                 if slope else round(self._level_floor_z(), 4),
+            "pitch": round(slope.angle_deg, 1) if slope else 0.0,
+            "on_slope": slope.name if slope else None,
             "t": round(float(t), 3),
             "level": self._cur_level,
             "blocked": bool(self._blocked),
@@ -373,6 +681,20 @@ class SimNode(Node):
         plans one A* segment per level crossed and stitches them together at
         each gate's waypoint pair (see LeveledField.transition_waypoint_pair).
         """
+        self._planning = True
+        self._last_outcome = None
+        # Record the transition here rather than leaving it to the 10 Hz state
+        # publisher: A* finishes in about 10 ms, so a sampled history would
+        # never once contain "planning" even though it genuinely happened. A
+        # trace that silently drops every short-lived state is worse than no
+        # trace -- it is the slow plans you most want to see.
+        self._control.update(self.sim.clock.t, "planning")
+        try:
+            self._plan_and_follow(msg)
+        finally:
+            self._planning = False
+
+    def _plan_and_follow(self, msg: PoseStamped) -> None:
         start = (float(self.sim.body.pose[0]), float(self.sim.body.pose[1]))
         goal = (float(msg.pose.position.x), float(msg.pose.position.y))
 
@@ -516,6 +838,11 @@ class SimNode(Node):
         self._cur_level = "ground"
         self._safe_pose = self.sim.body.pose.copy()
         self._checked_pose = self.sim.body.pose.copy()
+        # A reset starts a new run: leaving the previous one's outcome behind
+        # makes the state display claim the robot has already arrived.
+        self._last_outcome = None
+        self._control.__init__()
+        self._phase.__init__()
         resp.success = True
         resp.message = "sim reset"
         return resp
@@ -565,7 +892,8 @@ class SimNode(Node):
                 f"giving up {d_goal:.2f} m short: held at ({pose[0]:.2f}, "
                 f"{pose[1]:.2f}) on {self._cur_level} for "
                 f"{self._traj_stalled:.1f} s -- the reference is {lag:.2f} m "
-                "ahead and the robot is not closing it", warn=True)
+                "ahead and the robot is not closing it", warn=True,
+                outcome="gave_up")
             return
 
         if self._traj_t >= traj.duration:
@@ -579,16 +907,21 @@ class SimNode(Node):
             if self._traj_settle > self._traj_settle_timeout:
                 self._stop_following(
                     f"stopped {d_goal:.2f} m from the goal after "
-                    f"{self._traj_settle:.1f} s of settling", warn=True)
+                    f"{self._traj_settle:.1f} s of settling", warn=True,
+                    outcome="gave_up")
                 return
 
         self._cmd_vel = self._follower.command(self._traj_t, pose)
 
-    def _stop_following(self, why: str, warn: bool = False) -> None:
+    def _stop_following(self, why: str, warn: bool = False,
+                        outcome: str = "arrived") -> None:
+        self._last_outcome = outcome
         self._follower = None
         self._cmd_vel = np.zeros(3)
-        log = self.get_logger().warn if warn else self.get_logger().info
-        log(f"following ended: {why}")
+        if warn:                      # separate call sites -- see _load_slopes
+            self.get_logger().warn(f"following ended: {why}")
+        else:
+            self.get_logger().info(f"following ended: {why}")
 
     def _resolve_collision(self) -> None:
         """Undo a motion that put the real (rotated) footprint into a wall, the
@@ -665,11 +998,12 @@ class SimNode(Node):
         for _ in range(self._steps_per_tick):
             self._advance_following()
             torque = self._wheel_torque()
-            self.sim.step(torque)
+            self.sim.step(torque, self._slope_wrench())
             self._resolve_collision()
             self.sim.update_odometry(
                 wheel_angle=self.encoder._rad_per_count * np.round(
-                    self.sim.wheel_angle_true / self.encoder._rad_per_count))
+                    self.sim.wheel_angle_true / self.encoder._rad_per_count),
+                gyro_wz=self._gyro_wz)
             t = self.sim.clock.t
             self._poll_and_publish(t, dt_sim)
         # publish clock once per tick with the latest sim time
@@ -737,6 +1071,11 @@ class SimNode(Node):
             t, {"wheel_angle_rad": self.sim.wheel_angle_true})
         if enc is not None:
             self._publish_joint(stamp, enc)
+        if reading is not None:
+            # Feed the IMU's *measured* yaw rate to the odometry pod, so its
+            # heading inherits real gyro noise and bias walk rather than the
+            # true rate. Held between IMU samples (200 Hz vs the 10 kHz step).
+            self._gyro_wz = float(reading.angular_velocity_z)
 
         scan = self.lidar.maybe_sample(
             t, {"pose": self.sim.body.pose, "twist": twist_world})

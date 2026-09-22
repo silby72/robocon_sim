@@ -104,3 +104,63 @@ def build_mass_matrix(chassis: Chassis) -> np.ndarray:
         [0.0,      m,         m * cx],
         [-m * cy,  m * cx,    izz_center],
     ])
+
+
+def build_odometry_jacobian(chassis: Chassis, *, with_gyro: bool = False
+                            ) -> tuple[np.ndarray, list[str]]:
+    """Measurement matrix for the *standalone* odometry units, plus their ids.
+
+    Rows map a body twist ``[vx, vy, wz]`` to what each unit measures:
+
+    ``dead_wheel``  its own angular velocity [rad/s]. Same projection as a
+                    drive wheel -- contact point velocity onto the measure
+                    axis, divided by the radius -- but with **no gear ratio**:
+                    a dead wheel's encoder is on the wheel itself.
+    ``optical``     two rows, the planar velocity at its mounting point
+                    resolved in the body frame [m/s].
+
+    ``with_gyro`` appends a ``[0, 0, 1]`` row for a yaw-rate measurement. This
+    is usually not optional in practice: two dead wheels give two equations for
+    three unknowns, so the twist is *not observable* from them alone. The
+    caller is expected to check (see ``odometry_observability``) rather than
+    discover it as a silently wrong estimate.
+
+    Coordinates are the geometric centre (base_link), matching
+    ``build_drive_jacobian``.
+    """
+    rows: list[np.ndarray] = []
+    ids: list[str] = []
+    for o in chassis.odometry:
+        x, y = o.position_m
+        if o.type == "dead_wheel":
+            th = float(o.measure_axis_rad)
+            c, s = np.cos(th), np.sin(th)
+            rows.append(np.array([c, s, x * s - y * c]) / float(o.radius_m))
+            ids.append(o.id)
+        elif o.type == "optical":
+            rows.append(np.array([1.0, 0.0, -y]))
+            rows.append(np.array([0.0, 1.0, x]))
+            ids.extend([f"{o.id}.vx", f"{o.id}.vy"])
+        else:                                   # schema validates, belt and braces
+            raise ValueError(f"odometry '{o.id}': unsupported type {o.type!r}")
+    if with_gyro:
+        rows.append(np.array([0.0, 0.0, 1.0]))
+        ids.append("gyro.wz")
+    if not rows:
+        return np.zeros((0, 3)), []
+    return np.asarray(rows, dtype=float), ids
+
+
+def odometry_observability(matrix: np.ndarray) -> tuple[bool, float]:
+    """``(is_observable, condition_number)`` for an odometry measurement set.
+
+    A rank-deficient set cannot recover the twist at all; an ill-conditioned
+    one recovers it while amplifying noise. Both are worth refusing loudly:
+    the failure mode of using them anyway is a pose estimate that looks
+    plausible and is wrong in a direction nobody chose.
+    """
+    if matrix.shape[0] < 3:
+        return False, float("inf")
+    cond = float(np.linalg.cond(matrix))
+    ok = np.linalg.matrix_rank(matrix) == 3 and cond < CONDITION_NUMBER_LIMIT
+    return ok, cond

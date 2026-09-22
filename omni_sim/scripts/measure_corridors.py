@@ -29,7 +29,9 @@ from omni_sim_core.planning.cost_field import CostField         # noqa: E402
 from omni_sim_core.planning.types import PlanConfig             # noqa: E402
 
 SPEC = ROOT / "config" / "field" / "robocon2027.yaml"
-RAMP_EXIT_M = (2.4, 4.75)      # where the red ramp lands on L1
+RAMP_EXIT_M = (3.3, 6.0)       # on the L1 slab, just east of the ramp doorway
+RAMP_FOOT_M = (2.0, 3.3)       # on the ground, at the bottom of the ramp
+RAMP_TOP_M = (2.0, 6.2)        # on the ground grid still -- the ramp's top
 STAIRS_X_M = (4.7, 6.3)        # the Stairs gate's x-span
 
 
@@ -45,6 +47,21 @@ def reachable_on_l1(cf: CostField, res: float):
     if cid == 0:
         return None
     return lab == cid
+
+
+def ramp_passable(cf_ground: CostField, res: float) -> bool:
+    """Can this chassis actually drive up the ramp?
+
+    Checked on the GROUND grid, because that is where the ramp is carved: the
+    sloped part belongs to no floor, and only the ground raster clears it.
+    Flood-filling from the L1 slab instead (which is what this script used to
+    do) answers "can it move around once it is up there", a question that has
+    nothing to do with whether it can get up.
+    """
+    comp = _components(~cf_ground.lethal)[0]
+    foot = comp[int(RAMP_FOOT_M[1] / res), int(RAMP_FOOT_M[0] / res)]
+    top = comp[int(RAMP_TOP_M[1] / res), int(RAMP_TOP_M[0] / res)]
+    return bool(foot != 0 and foot == top)
 
 
 def free_bands(cf: CostField, x: float, res: float):
@@ -71,6 +88,12 @@ def analyse(size_m: float, verbose: bool = True) -> bool:
     cfs = {l: CostField(grids[l], cfg) for l in grids}
     res = grids["ground"].meta.resolution
 
+    if not ramp_passable(cfs["ground"], res):
+        if verbose:
+            print(f"=== square chassis {size_m:.3f} m  ->  r_circ {r_circ:.3f} m ===")
+            print("  the RAMP itself is impassable (it is 1000 mm wide; the "
+                  f"planner needs {2 * r_circ * 1000:.0f} mm)")
+        return False
     reach = reachable_on_l1(cfs["l1"], res)
     if reach is None:
         if verbose:
@@ -84,8 +107,10 @@ def analyse(size_m: float, verbose: bool = True) -> bool:
 
     if verbose:
         print(f"=== square chassis {size_m:.3f} m  ->  r_circ {r_circ:.3f} m ===")
-        print(f"ground, ramp approach (y=4.75): free x "
-              f"{_fmt(free_bands_x(cfs['ground'], 4.75, res))}")
+        print(f"ground, on the ramp (x=2.00): free y "
+              f"{_fmt(free_bands(cfs['ground'], 2.0, res))}")
+        print(f"ground, across the ramp (y=5.00): free x "
+              f"{_fmt(free_bands_x(cfs['ground'], 5.0, res))}")
         print(f"L1 reachable from the ramp: x {xs.min()*res:.2f}..{xs.max()*res:.2f}, "
               f"y {ys.min()*res:.2f}..{ys.max()*res:.2f}  ({reach.sum()} cells)")
         ring = free_bands(cfs["l1"], 3.2, res)

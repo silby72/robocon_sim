@@ -47,9 +47,9 @@ def test_scene_is_json_serialisable(scene):
 
 def test_robot_comes_from_the_chassis_config(scene):
     robot = scene["robot"]
-    assert robot["size"] == pytest.approx(900.0)          # chassis.yaml, mm
+    assert robot["size"] == pytest.approx(700.0)          # chassis.yaml, mm
     assert len(robot["footprint"]) == 4                   # a rectangle, not a dot
-    assert robot["r_circ"] == pytest.approx(900.0 * np.sqrt(2) / 2)
+    assert robot["r_circ"] == pytest.approx(700.0 * np.sqrt(2) / 2)
     assert {w["id"] for w in robot["wheels"]} == {"fl", "fr", "rl", "rr"}
     for w in robot["wheels"]:
         assert w["radius"] > 0

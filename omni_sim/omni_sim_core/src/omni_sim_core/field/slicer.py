@@ -73,7 +73,15 @@ def slice_nav(spec: FieldSpec, prims: list[Primitive],
     # perimeter barrier at the ramp top). Carving before the loops above would
     # let the barrier close the doorway again and leave the layers disconnected.
     for c in spec.connectors:
-        if layer.name in c.links:
-            cx0, cy0, cx1, cy1 = c.rect
-            raster[(X >= cx0) & (X <= cx1) & (Y >= cy0) & (Y <= cy1)] = FREE
+        if layer.name not in c.links:
+            continue
+        # A ramp is only level with the upper slab at its top. Carving its
+        # whole footprint on the upper layer let a robot step onto L1 from any
+        # height part-way up; the landing rectangle is the part that is
+        # actually at slab height, and it is also what punches the doorway
+        # through the perimeter barrier.
+        upper = max(c.links, key=lambda n: spec.layers[n].floor_z)
+        rect = c.landing if (c.landing is not None and layer.name == upper) else c.rect
+        cx0, cy0, cx1, cy1 = rect
+        raster[(X >= cx0) & (X <= cx1) & (Y >= cy0) & (Y <= cy1)] = FREE
     return raster

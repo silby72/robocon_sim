@@ -12,3 +12,32 @@ ratios:
 
 mode: ratio          # ratio | manual
 manual_file: null    # required when mode == manual: path to a hand-written nominal
+
+# What the ODOMETRY believes about the wheels, versus what is true. Same idea
+# as the ratios above, applied to dead reckoning instead of the controller's
+# plant model: the estimator gets its own, deliberately wrong geometry, and
+# the gap is what a localisation filter has to close.
+#
+# All 1.0 / 0.0 = perfect odometry, which is what this was before the block
+# existed: 0.01 mm of error after 9 m of driving and spinning. Useful for
+# isolating a controller bug, useless for testing an estimator.
+#
+# The values below are a deliberately mild, plausible set -- [A], not measured.
+# Replace them with numbers from a real calibration run when you have one:
+# drive a known square, compare odometry to the true finish, and solve.
+odometry:
+  # believed rolling radius / true. Per-wheel entries are allowed and are what
+  # make odometry *curve* rather than merely run long or short; a single float
+  # applies to every wheel.
+  wheel_radius_ratio: [1.004, 0.997, 1.002, 0.999]   # [A] +-0.4 %, e.g. wear
+  # believed wheel offsets / true. Shows up almost entirely as heading-rate
+  # error, which then rotates every later translation -- the dominant term.
+  track_ratio: 1.006                                  # [A] +0.6 %
+  # measured wheel rotation per rotation that actually moved the robot.
+  # > 1.0 means the wheels turned more than the body travelled.
+  slip_ratio: 1.002                                   # [A] 0.2 % slip
+  slip_noise_std: 0.0                                 # [A] per-update, relative
+  # the standalone units' own radius error. They are not magic -- they just do
+  # not see drive slip, so this is the error that is left once slip stops
+  # mattering.
+  dead_wheel_radius_ratio: 1.003                      # [A] +0.3 %

@@ -1,0 +1,17 @@
+[1.612s] Invoking command in '/home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros/build --no-deps symlink_data
+[2.259s] running develop
+[2.622s] running egg_info
+[2.655s] writing omni_sim_ros.egg-info/PKG-INFO
+[2.656s] writing dependency_links to omni_sim_ros.egg-info/dependency_links.txt
+[2.656s] writing entry points to omni_sim_ros.egg-info/entry_points.txt
+[2.656s] writing requirements to omni_sim_ros.egg-info/requires.txt
+[2.657s] writing top-level names to omni_sim_ros.egg-info/top_level.txt
+[2.727s] reading manifest file 'omni_sim_ros.egg-info/SOURCES.txt'
+[2.729s] writing manifest file 'omni_sim_ros.egg-info/SOURCES.txt'
+[2.765s] running build_ext
+[2.765s] Creating /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/lib/python3.12/site-packages/omni-sim-ros.egg-link (link to .)
+[2.766s] Installing sim_node script to /home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/bin
+[2.767s] 
+[2.767s] Installed /home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros
+[2.767s] running symlink_data
+[2.822s] Invoked command in '/home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros' returned '0': DEBUGINFOD_URLS=https://debuginfod.ubuntu.com PYTHONPATH=/home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros/prefix_override:/usr/lib/python3/dist-packages/colcon_core/task/python/colcon_distutils_commands:/home/ubuntu/robocon_sim/ros2_ws/install/omni_sim_ros/lib/python3.12/site-packages:${PYTHONPATH} /usr/bin/python3 -W ignore:setup.py install is deprecated -W ignore:easy_install command is deprecated setup.py develop --editable --build-directory /home/ubuntu/robocon_sim/ros2_ws/build/omni_sim_ros/build --no-deps symlink_data

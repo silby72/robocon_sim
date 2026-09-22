@@ -307,7 +307,7 @@ def test_transition_waypoints_are_plannable_for_the_real_chassis():
 
     root = Path(__file__).resolve().parents[2]
     field = LayeredField.from_yaml(root / "config" / "field" / "robocon2027.yaml")
-    r_circ = 0.9 * np.sqrt(2) / 2                      # config/robot/chassis.yaml
+    r_circ = 0.7 * np.sqrt(2) / 2                      # config/robot/chassis.yaml
     cfields = {lvl: CostField(field.grid(lvl, "nav"), PlanConfig(r_circ=r_circ))
                for lvl in ("ground", "l1", "l2")}
 
@@ -351,7 +351,7 @@ def test_l1_ring_is_reachable_from_the_ramp_and_reaches_the_stairs():
     root = Path(__file__).resolve().parents[2]
     field = LayeredField.from_yaml(root / "config" / "field" / "robocon2027.yaml")
     g = field.grid("l1", "nav")
-    cf = CostField(g, PlanConfig(r_circ=0.9 * np.sqrt(2) / 2))
+    cf = CostField(g, PlanConfig(r_circ=0.7 * np.sqrt(2) / 2))
 
     comp, _ = label(~cf.lethal)
     r, c = g.world_to_grid(*_RAMP_WAYPOINTS_M["red"][1])   # where the ramp lands

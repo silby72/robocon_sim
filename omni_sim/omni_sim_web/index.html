@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>omni_sim console</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- QToolBar ------------------------------------------------------------ -->
+<div class="toolbar">
+  <span class="app">omni_sim <span class="sub">console</span></span>
+  <span class="sep"></span>
+  <input type="text" id="url" value="ws://localhost:9090" style="width:186px">
+  <button id="connectBtn">接続</button>
+  <span class="led" id="connLed"></span>
+  <span id="status" hidden><span class="dot"></span><span id="statusText"></span></span>
+  <span class="sep"></span>
+  <button id="reloadBtn" title="config/robot/* を読み直す（機体設定 GUI が書き出す先）">設定リロード</button>
+  <span class="spacer"></span>
+  <button class="danger" id="estopBtn" title="全輪トルクを 0 にする">停止</button>
+  <span class="version" id="version">—</span>
+</div>
+
+<!-- QSplitter ----------------------------------------------------------- -->
+<div class="workspace">
+
+  <nav class="sidebar" id="sidebar">
+    <div class="group">ライブ</div>
+    <button class="nav-item" data-page="page-sim">
+      自動走行<span class="nav-note" id="nav-sim">未接続</span>
+    </button>
+
+    <div class="group">オフライン</div>
+    <button class="nav-item" data-page="page-chassis">
+      機体設定<span class="nav-note" id="nav-chassis">Pyodide</span>
+    </button>
+    <button class="nav-item" data-page="page-verify">
+      検証<span class="nav-note" id="nav-verify">未実行</span>
+    </button>
+    <button class="nav-item" data-page="page-about">
+      構成<span class="nav-note"></span>
+    </button>
+  </nav>
+
+  <div class="stack">
+
+    <!-- ============ 自動走行 ============ -->
+    <!-- ids below are unchanged from omni_sim_ros/web/dashboard.html so that
+         js/panel-sim.js is a move, not a rewrite. -->
+    <section class="page" id="page-sim">
+      <div class="sim-layout">
+        <div id="topics">
+          <h2>トピック</h2>
+          <input type="text" id="filter" placeholder="絞り込み…">
+          <div id="topicList"><div class="empty">未接続</div></div>
+        </div>
+
+        <div id="mapPanel">
+          <h2>フィールドと経路</h2>
+          <canvas id="mapCanvas" width="800" height="800"></canvas>
+          <div id="robotStatus"><code>/sim/scene</code> を待っています…</div>
+          <div id="stateBox" hidden>
+            <div class="chips" id="ctrlChips"></div>
+            <div class="chips" id="phaseChips"></div>
+            <div id="trace"></div>
+          </div>
+          <div id="motorBox" hidden>
+            <label for="motorSel">駆動モータ</label>
+            <select id="motorSel"></select>
+            <span id="motorNote"></span>
+          </div>
+          <div id="mapHint">
+            フィールドをクリックすると <code>/goal_pose</code> にゴールを送ります
+            （A* は現在姿勢から、結果は <code>/plan</code>、追従する C² 曲線は
+            <code>/trajectory</code>）。<br>
+            <b>斜線</b> = 現在レベルで壁になるもの ·
+            <b>薄い灰</b> = このレベルを塞がない形状 ·
+            <b>桃</b> = スラブの外＝落下 ·
+            <b>破線円</b> = A* が膨張させる半径 ·
+            <b>破線</b> = A* の折れ線、<b>実線</b> = 追従中の曲線。
+          </div>
+          <div id="planStatus">まだ経路要求はありません</div>
+        </div>
+
+        <div id="cards"><div class="empty">接続してから左のトピックをクリックすると購読します。</div></div>
+      </div>
+    </section>
+
+    <!-- ============ 機体設定 ============ -->
+    <section class="page" id="page-chassis">
+      <div class="pane">
+        <div class="cols">
+          <div>
+            <div class="group-box">
+              <h2>入力</h2>
+              <div class="body">
+                <div class="row">
+                  <label for="preset">モータ</label>
+                  <select id="preset" class="grow"></select>
+                </div>
+                <p class="hint" id="preset-hint">config/presets/motors/ から</p>
+
+                <div class="row">
+                  <label for="gear">減速比</label>
+                  <input type="range" id="gear" class="grow" min="1.0" max="6.0" step="0.05" value="2.0">
+                  <span class="readout" id="gear-v">2.00</span>
+                  <span class="unit">: 1</span>
+                </div>
+                <p class="hint">モータ : ホイール。現行機は 6.0</p>
+
+                <div class="row">
+                  <label for="radius">ホイール半径</label>
+                  <input type="range" id="radius" class="grow" min="0.030" max="0.080" step="0.0005" value="0.050">
+                  <span class="readout" id="radius-v">50.0</span>
+                  <span class="unit">mm</span>
+                </div>
+                <p class="hint">30–80 mm（直径 60–160 mm）</p>
+
+                <div class="row">
+                  <label for="mass">機体質量</label>
+                  <input type="range" id="mass" class="grow" min="5" max="30" step="0.5" value="15">
+                  <span class="readout" id="mass-v">15.0</span>
+                  <span class="unit">kg</span>
+                </div>
+                <p class="hint">4 輪に等分して負荷慣性に反映</p>
+
+                <div class="row">
+                  <label for="kv">Kv 上書き</label>
+                  <input type="range" id="kv" class="grow" min="0" max="120" step="0.5" value="0">
+                  <span class="readout" id="kv-v">—</span>
+                  <span class="unit">rpm/V</span>
+                </div>
+                <p class="hint">0 でプリセットのまま。変更すると Kt から再導出される</p>
+              </div>
+            </div>
+
+
+            <div class="group-box" id="nm-box" hidden>
+              <h2>新規モータ</h2>
+              <div class="body">
+                <div class="row">
+                  <label for="nm-name">名前</label>
+                  <input type="text" id="nm-name" class="grow" value="my_motor"
+                         placeholder="ファイル名になる">
+                </div>
+                <p class="hint">英数字とアンダースコアのみ。<code>&lt;名前&gt;.yaml</code> になります</p>
+
+                <div class="row">
+                  <label for="nm-v">定格電圧</label>
+                  <input type="number" id="nm-v" class="grow" value="24" step="0.1" min="0.1">
+                  <span class="unit">V</span>
+                </div>
+                <div class="row">
+                  <label for="nm-kv">Kv</label>
+                  <input type="number" id="nm-kv" class="grow" value="20" step="0.1" min="0.01">
+                  <span class="unit">rpm/V</span>
+                </div>
+                <p class="hint">
+                  減速機付きなら<b>出力軸に換算した値</b>を入れること。ロータ側の Kv と
+                  出力側のトルクを混ぜると ak40_10_v3 と同じ壊れ方をします
+                </p>
+
+                <div class="row">
+                  <label for="nm-istall">ストール電流</label>
+                  <input type="number" id="nm-istall" class="grow" value="10.5" step="0.1" min="0.01">
+                  <span class="unit">A</span>
+                </div>
+                <div class="row">
+                  <label for="nm-inl">無負荷電流</label>
+                  <input type="number" id="nm-inl" class="grow" value="0.5" step="0.01" min="0">
+                  <span class="unit">A</span>
+                </div>
+                <div class="row">
+                  <label for="nm-j">ロータ慣性</label>
+                  <input type="number" id="nm-j" class="grow" value="" step="any" min="0"
+                         placeholder="空欄 = 不明（derive が推定）">
+                  <span class="unit">kg·m²</span>
+                </div>
+                <div class="row">
+                  <label for="nm-cpr">エンコーダ</label>
+                  <input type="number" id="nm-cpr" class="grow" value="8192" step="1" min="1">
+                  <span class="unit">cpr</span>
+                </div>
+                <div class="row">
+                  <label for="nm-r">巻線抵抗</label>
+                  <input type="number" id="nm-r" class="grow" value="" step="any" min="0"
+                         placeholder="空欄 = V/I_stall から">
+                  <span class="unit">Ω</span>
+                </div>
+
+                <div class="subhead">照合用（モデルは読まない）</div>
+                <div class="row">
+                  <label for="nm-tau">ストールトルク</label>
+                  <input type="number" id="nm-tau" class="grow" value="4.77" step="any" min="0">
+                  <span class="unit">N·m</span>
+                </div>
+                <div class="row">
+                  <span class="led" id="nm-tau-led"></span>
+                  <span class="grow" id="nm-tau-msg" style="font-size:11.5px;color:#888"></span>
+                </div>
+                <div class="row">
+                  <label for="nm-rpm">無負荷回転数</label>
+                  <input type="number" id="nm-rpm" class="grow" value="480" step="any" min="0">
+                  <span class="unit">rpm</span>
+                </div>
+                <div class="row">
+                  <span class="led" id="nm-rpm-led"></span>
+                  <span class="grow" id="nm-rpm-msg" style="font-size:11.5px;color:#888"></span>
+                </div>
+                <p class="hint" style="margin-left:0">
+                  この 2 つは <code>derive_motor</code> が読みません（Kt·(I_stall−I_nl) と
+                  Kv×V から計算し直します）。合わない = 3 つの数字のどれかが転記ミス。
+                </p>
+
+                <div class="row" style="margin-top:12px">
+                  <button class="primary grow" id="nm-yaml-btn">YAML を書き出す</button>
+                </div>
+                <div id="nm-out" hidden>
+                  <p class="note" style="margin:10px 0 6px" id="nm-path"></p>
+                  <pre class="log" id="nm-yaml" style="max-height:300px"></pre>
+                  <div class="row">
+                    <button id="nm-copy" class="grow">コピー</button>
+                    <button id="nm-dl" class="grow">ダウンロード</button>
+                  </div>
+                  <p class="note">
+                    保存したら <code>scripts/sync_web_core.sh</code> を走らせるとこのページの
+                    一覧にも出ます。<code>.venv/bin/python -m pytest
+                    omni_sim_core/tests/test_motor_presets.py</code> が転記を検査します。
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div class="group-box">
+              <h2>配置</h2>
+              <div class="body">
+                <figure class="plan">
+                  <canvas id="plan" width="640" height="640"
+                          aria-label="機体上面図：4 輪の位置と駆動軸"></canvas>
+                  <figcaption id="plan-caption">上面図。矢印は各輪の駆動軸。</figcaption>
+                </figure>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="figures">
+              <div class="figure">
+                <div class="k">軸方向 最高速度</div>
+                <div class="v" id="v-axis">—</div>
+                <div class="n">無負荷・抗力なし。速い方</div>
+              </div>
+              <div class="figure">
+                <div class="k">対角 最高速度</div>
+                <div class="v" id="v-diag">—</div>
+                <div class="n">同じ輪速上限で ÷√2</div>
+              </div>
+              <div class="figure">
+                <div class="k">登坂角</div>
+                <div class="v" id="climb">—</div>
+                <div class="n" id="climb-note">ストール推力から</div>
+              </div>
+              <div class="figure">
+                <div class="k">ストール推力</div>
+                <div class="v" id="push">—</div>
+                <div class="n">+x 方向、4 輪合計</div>
+              </div>
+            </div>
+
+            <div class="group-box">
+              <h2>導出されたモータ定数</h2>
+              <div class="body">
+                <div class="scroll-x">
+                  <table class="slots"><tbody id="derived"></tbody></table>
+                </div>
+                <p class="note">
+                  <code>mechanism/derive.derive_motor</code> の出力そのまま。
+                  <span class="badge est">推定</span> はデータシートに値がなく derive が推定した項目。
+                </p>
+              </div>
+            </div>
+
+            <div class="group-box" id="yaw-panel" hidden>
+              <h2>旋回権限の偏り</h2>
+              <div class="body"><p class="note danger" id="yaw-warning"></p></div>
+            </div>
+
+            <div class="group-box">
+              <h2>駆動ヤコビアン J</h2>
+              <div class="body">
+                <div class="scroll-x">
+                  <table class="slots">
+                    <thead>
+                      <tr><th>輪</th><th>∂ω/∂v<sub>x</sub></th><th>∂ω/∂v<sub>y</sub></th><th>∂ω/∂ω<sub>z</sub></th><th>旋回寄与</th></tr>
+                    </thead>
+                    <tbody id="jac"></tbody>
+                  </table>
+                </div>
+                <p class="note">
+                  車体ツイスト <code>[vx, vy, wz]</code> → 各輪のモータ軸角速度 [rad/s]。
+                  <code>mechanism/jacobian.build_drive_jacobian</code>。
+                </p>
+              </div>
+            </div>
+
+            <div class="group-box">
+              <h2>この数値の出どころ</h2>
+              <div class="body"><p class="note" id="provenance">—</p></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 検証 ============ -->
+    <section class="page" id="page-verify">
+      <div class="pane">
+        <div class="verdict" id="verdict">未実行</div>
+
+        <div class="group-box">
+          <h2>ケース</h2>
+          <div class="body" style="padding:0">
+            <div id="results"><div class="empty">このパネルを開くと実行します。</div></div>
+          </div>
+        </div>
+
+        <div class="group-box">
+          <h2>ロード時間</h2>
+          <div class="body">
+            <div class="figures" id="timing" style="margin:0"></div>
+            <p class="note">
+              初回のみ。Pyodide と numpy は CDN から取得され、以降はブラウザの
+              HTTP キャッシュに載る。
+            </p>
+          </div>
+        </div>
+
+        <div class="group-box">
+          <h2>ログ</h2>
+          <div class="body"><pre class="log" id="log"></pre></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 構成 ============ -->
+    <section class="page" id="page-about">
+      <div class="pane">
+        <div class="group-box">
+          <h2>2 つの系統が 1 つのシェルに載っている</h2>
+          <div class="body">
+            <table class="slots">
+              <thead><tr><th></th><th>自動走行</th><th>機体設定・検証</th></tr></thead>
+              <tbody>
+                <tr><th>実行場所</th><td>ROS 2 ノード（別プロセス）</td><td>ブラウザ内（Pyodide）</td></tr>
+                <tr><th>経路</th><td>rosbridge WebSocket 9090</td><td>なし</td></tr>
+                <tr><th>必要なもの</th><td>sim が起動していること</td><td>CDN 到達（初回のみ）</td></tr>
+                <tr><th>コード</th><td>omni_sim_ros/sim_node.py</td><td>omni_sim_core のコピー</td></tr>
+              </tbody>
+            </table>
+            <p class="note">
+              片方が落ちてももう片方は動きます。sim を起動していなければ自動走行だけが
+              未接続になり、機体設定と検証はそのまま使えます。
+            </p>
+          </div>
+        </div>
+
+        <div class="group-box">
+          <h2>ブラウザに載っている omni_sim_core</h2>
+          <div class="body">
+            <div class="scroll-x">
+              <table class="slots"><tbody id="bundle"></tbody></table>
+            </div>
+            <p class="note">
+              <code>scripts/sync_web_core.sh</code> が 1 バイトも変えずにコピーしたもの。
+              ページは Pyodide の仮想 FS に書き出して import するので、走っているのは
+              pytest が走らせるのと同じバイト列です。
+            </p>
+          </div>
+        </div>
+
+        <div class="group-box">
+          <h2>同期</h2>
+          <div class="body">
+            <p class="note" style="margin-top:0">
+              <code>mechanism/</code> を触ったら両方走らせる。忘れても静かには壊れず、
+              <code>omni_sim_web/tests/test_web_bundle.py</code> がハッシュ不一致で落ちます。
+            </p>
+            <pre class="log">scripts/sync_web_core.sh
+.venv/bin/python scripts/export_golden_values.py</pre>
+          </div>
+        </div>
+
+        <div class="group-box">
+          <h2>オフライン</h2>
+          <div class="body"><p class="note" style="margin-top:0" id="sw-state">—</p></div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<!-- QStatusBar ---------------------------------------------------------- -->
+<div class="statusbar">
+  <span class="msg" id="statusbar-msg">準備完了</span>
+  <span class="right" id="statusbar-right"></span>
+</div>
+
+<script src="js/vendor/roslib.min.js"></script>
+<script src="js/core-bundle.js"></script>
+<script src="js/golden.js"></script>
+<script src="js/web-api.js"></script>
+<script src="js/register-sw.js"></script>
+<script src="js/pyodide-bridge.js"></script>
+<script src="js/panel-sim.js"></script>
+<script src="js/panel-chassis.js"></script>
+<script src="js/panel-verify.js"></script>
+<script src="js/shell.js"></script>
+</body>
+</html>

@@ -28,6 +28,9 @@ touch ``RobotSim`` itself, so the Phase 0/1 acceptance tests are unaffected.
 """
 from __future__ import annotations
 
+import logging
+from pathlib import Path
+
 import numpy as np
 
 from ..env.occupancy_grid import OCCUPIED, OccupancyGrid
@@ -102,10 +105,32 @@ class LeveledField:
             "l1": OccupancyGrid.from_yaml(l1_yaml),
             "l2": OccupancyGrid.from_yaml(l2_yaml),
         }
+        # A LiDAR must raycast the *localization* raster, not the nav one.
+        # They are built the opposite way on purpose (field/slicer.py): nav is
+        # filled and holds everything that blocks the robot, loc holds only
+        # what is actually at the sensor's height. On the ground layer that is
+        # the difference between seeing the 50 mm field boundary and the
+        # 100 mm centre divider as walls -- which a LiDAR 185 mm up cannot --
+        # and seeing only the L1/L2 slabs and the Mustika pillar.
+        #
+        # Raycasting nav made the simulated sensor report surfaces the map
+        # correctly says are not there, so a scan could not be matched against
+        # the map it came from. Falls back to nav with a warning rather than
+        # failing, because older map sets have no _loc files.
+        self.loc_grids = {}
+        for name, path in (("ground", ground_yaml), ("l1", l1_yaml), ("l2", l2_yaml)):
+            loc = Path(path).with_name(Path(path).stem + "_loc.yaml")
+            if loc.exists():
+                self.loc_grids[name] = OccupancyGrid.from_yaml(str(loc))
+            else:
+                logging.getLogger(__name__).warning(
+                    "no %s; the LiDAR will raycast the nav raster and see "
+                    "walls the localization map does not contain", loc)
+                self.loc_grids[name] = self.grids[name]
         self.lidars = {
             name: Lidar(LidarParams(n_beams=n_beams, enable_motion_distortion=False),
-                        grid, np.random.default_rng(seed + i))
-            for i, (name, grid) in enumerate(self.grids.items())
+                        self.loc_grids[name], np.random.default_rng(seed + i))
+            for i, name in enumerate(self.grids)
         }
         # The crossing under way, if any: (level being left, level being
         # entered). Only this pair may commit a level change when the centre

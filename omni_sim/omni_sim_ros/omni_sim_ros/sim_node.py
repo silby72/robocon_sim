@@ -20,7 +20,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy
 
 from builtin_interfaces.msg import Time as TimeMsg
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseArray, Pose, PoseStamped, Twist
 from nav_msgs.msg import Odometry, Path as PathMsg
 from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import Imu, JointState, LaserScan
@@ -97,6 +97,7 @@ class SimNode(Node):
         team = self.team = str(self.get_parameter("team").value)
 
         map_yaml = self.get_parameter("map_yaml").value
+        self._cur_level = "ground"      # only changes through a ramp/stairs gate
         self._leveled = None
         if map_yaml:
             self.grid = OccupancyGrid.from_yaml(map_yaml)
@@ -131,8 +132,18 @@ class SimNode(Node):
 
         rng = np.random.default_rng(seed)
         self.imu = ImuModel(ImuParams(), rng)
+        # The LiDAR raycasts the *localization* raster, which holds what is at
+        # the sensor's height -- not the nav raster, which holds what blocks
+        # the robot. On the ground layer that is the difference between
+        # reporting the 50 mm field boundary and the 100 mm centre divider as
+        # walls (a LiDAR 185 mm up cannot see either) and reporting only the
+        # L1/L2 slabs and the Mustika pillar. Raycasting nav made every scan
+        # contain surfaces the map correctly says are absent, which is fatal
+        # for matching a scan against the map it came from.
+        lidar_grid = (self._leveled.loc_grids[self._cur_level]
+                      if self._leveled is not None else self.grid)
         self.lidar = LidarModel(
-            LidarParams(enable_motion_distortion=lidar_distortion), self.grid, rng)
+            LidarParams(enable_motion_distortion=lidar_distortion), lidar_grid, rng)
         self.encoder = EncoderModel(EncoderParams(), rng)
 
         # --- pub/sub ---
@@ -199,7 +210,7 @@ class SimNode(Node):
         self._traj_t = 0.0          # governed position along the trajectory
         self._traj_stalled = 0.0    # sim seconds the reference has been held
         self._traj_settle = 0.0     # sim seconds spent past the profile's end
-        self._cur_level = "ground"      # only changes through a ramp/stairs gate
+        # (_cur_level is initialised before the LiDAR, which needs it)
         self._collision_steps = 0
         self._collision_logged = False
         self._blocked = False
@@ -224,8 +235,19 @@ class SimNode(Node):
             "config/field/robocon2027.yaml")
         self.pub_scene = self.create_publisher(String, "/sim/scene", 1)
         self.pub_state = self.create_publisher(String, "/sim/state", 10)
+        # MCL output: the corrected pose, and the particle cloud behind it.
+        # Both, because an estimate without its spread cannot be judged -- a
+        # confident wrong answer and a hedged right one look identical.
+        self.pub_loc = self.create_publisher(Odometry, "/localization/odom", 10)
+        self.pub_cloud = self.create_publisher(PoseArray, "/particle_cloud", 1)
         self._field_yaml = field_yaml
         self._slopes = self._load_slopes(field_yaml)
+        self.declare_parameter("mcl_particles", 400)
+        self.declare_parameter("localization", True)
+        self._pf = None
+        self._loc_fields = {}
+        self._prev_odom_for_mcl = self.sim.odom_pose.copy()
+        self._setup_localization()
         self._scene_json = self._build_scene(field_yaml, chassis_yaml, team)
         # Re-published on a timer rather than latched: rosbridge bridges a
         # browser subscription with its own QoS, and a transient-local
@@ -359,6 +381,90 @@ class SimNode(Node):
         for msg in warnings.messages:
             self.get_logger().warn(f"robot config: {msg}")
         return cfg
+
+    def _setup_localization(self) -> None:
+        """A likelihood field per level, and a particle filter over them.
+
+        One field per level because the three rasters share a world frame but
+        describe different floors: scoring an L1 scan against the ground map
+        would be matching against the wrong building. The filter keeps its
+        particles across a level change -- the robot did not teleport, only
+        the map it should be judged against did.
+        """
+        if not bool(self.get_parameter("localization").value) or self._leveled is None:
+            return
+        try:
+            from omni_sim_core.localization import (LikelihoodField, MCLParams,
+                                                    ParticleFilter)
+            self._loc_fields = {lvl: LikelihoodField(grid)
+                                for lvl, grid in self._leveled.loc_grids.items()}
+            self._pf = ParticleFilter(
+                self._loc_fields[self._cur_level], self.sim.body.pose,
+                params=MCLParams(
+                    n_particles=int(self.get_parameter("mcl_particles").value)),
+                rng=np.random.default_rng(self._seed + 977))
+        except Exception as exc:
+            self.get_logger().warn(f"localization disabled: {exc}")
+            self._pf = None
+            return
+        surfaces = {lvl: f.n_surface_cells for lvl, f in self._loc_fields.items()}
+        self.get_logger().info(
+            f"MCL on {self._pf.p.n_particles} particles; "
+            f"surface cells per level {surfaces}")
+        thin = [lvl for lvl, n in surfaces.items() if n < 500]
+        if thin:
+            self.get_logger().warn(
+                f"levels {thin} have very little for a LiDAR to see at "
+                "lidar_height -- localization there will be weak. The "
+                "boundary and divider heights are swept unknowns in the field "
+                "spec; raising them (or lowering the LiDAR) is the lever.")
+
+    def _reset_localization(self) -> None:
+        """Re-seed the filter at the robot's current pose."""
+        self._prev_odom_for_mcl = self.sim.odom_pose.copy()
+        if self._pf is None:
+            return
+        if self._cur_level in self._loc_fields:
+            self._pf.set_field(self._loc_fields[self._cur_level])
+        self._pf.reset(self.sim.body.pose)
+
+    def _update_localization(self, scan) -> None:
+        """One predict/update cycle, driven by the scan rate."""
+        if self._pf is None:
+            return
+        odom = self.sim.odom_pose
+        d_world = odom - self._prev_odom_for_mcl
+        th = float(self._prev_odom_for_mcl[2])
+        c, s = math.cos(-th), math.sin(-th)
+        self._pf.predict((c * d_world[0] - s * d_world[1],
+                          s * d_world[0] + c * d_world[1],
+                          math.atan2(math.sin(d_world[2]), math.cos(d_world[2]))))
+        self._prev_odom_for_mcl = odom.copy()
+        self._pf.update(scan.angles, scan.ranges)
+
+    def _publish_localization(self, stamp) -> None:
+        if self._pf is None:
+            return
+        est = self._pf.estimate()
+        msg = self._odom_msg(stamp, est, self.sim.body.twist_body(), "base_link")
+        msg.header.frame_id = "map"
+        spread = self._pf.spread()
+        # a diagonal covariance from the particle spread: crude, but it is the
+        # filter's own confidence rather than a constant nobody chose
+        msg.pose.covariance[0] = msg.pose.covariance[7] = spread ** 2
+        self.pub_loc.publish(msg)
+
+        cloud = PoseArray()
+        cloud.header = self._stamped_header("map")
+        step = max(1, len(self._pf.particles) // 200)   # keep the topic small
+        for x, y, yaw in self._pf.particles[::step]:
+            pose = Pose()
+            pose.position.x, pose.position.y = float(x), float(y)
+            qx, qy, qz, qw = yaw_to_quat(float(yaw))
+            pose.orientation.x, pose.orientation.y = qx, qy
+            pose.orientation.z, pose.orientation.w = qz, qw
+            cloud.poses.append(pose)
+        self.pub_cloud.publish(cloud)
 
     def _load_slopes(self, field_yaml: str):
         """The ramps, as inclines, plus whether this robot can get up them."""
@@ -528,6 +634,7 @@ class SimNode(Node):
         self._safe_pose = pose.copy()
         self._checked_pose = pose.copy()
         self._prev_twist_world = np.zeros(3)
+        self._reset_localization()
         # Re-size the speed profile: a faster motor that keeps planning at the
         # old one's top speed wastes it, and a slower one that keeps the old
         # figure plans trajectories it cannot follow -- which is the failure
@@ -843,6 +950,12 @@ class SimNode(Node):
         self._last_outcome = None
         self._control.__init__()
         self._phase.__init__()
+        # ...and the estimator. A particle filter carried across a reset is
+        # holding a belief about where a *different* run ended: on a map with
+        # few features it cannot recover from that, and the symptom is metres
+        # of error with a confident 400 mm spread, which reads like a broken
+        # filter rather than a stale one.
+        self._reset_localization()
         resp.success = True
         resp.message = "sim reset"
         return resp
@@ -980,7 +1093,11 @@ class SimNode(Node):
                 # the grid on the one sensor (rather than keeping one Lidar per
                 # level) keeps a single firing schedule: an idle Lidar's
                 # maybe_sample() would fire a catch-up burst when reactivated.
-                self.lidar.grid = self._leveled.grids[new_level]
+                # the LiDAR raycasts the *localization* raster, not nav: it
+                # sees what is at its own height, not what blocks the robot
+                self.lidar.grid = self._leveled.loc_grids[new_level]
+                if self._pf is not None and new_level in self._loc_fields:
+                    self._pf.set_field(self._loc_fields[new_level])
             self._cur_level = new_level
             self._collision_logged = False
             self._blocked = False
@@ -1081,6 +1198,8 @@ class SimNode(Node):
             t, {"pose": self.sim.body.pose, "twist": twist_world})
         if scan is not None:
             self._publish_scan(stamp, scan)
+            self._update_localization(scan)
+            self._publish_localization(stamp)
 
         # odom / ground truth at nav rate
         if self.sim.clock.nav_fires():

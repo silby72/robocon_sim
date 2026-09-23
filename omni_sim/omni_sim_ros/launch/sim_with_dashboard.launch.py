@@ -2,9 +2,16 @@
 
     ros2 launch omni_sim_ros sim_with_dashboard.launch.py map_yaml:=$PWD/maps/field_2027_ground.yaml
 
-Then open omni_sim_ros/web/dashboard.html (serve it, e.g.
-``python3 -m http.server`` from omni_sim_ros/web/, or just open the file
-directly -- both work since the page only needs a WebSocket to rosbridge).
+Then open ``omni_sim_web/index.html`` and pick 自動走行 in the sidebar. Opening
+the file directly works: the page only needs a WebSocket to rosbridge, and a
+file:// origin may open one. Serving it (``python3 -m http.server`` from
+omni_sim_web/) buys only the Service Worker, i.e. offline use.
+
+That page is also the chassis/verification console, which runs omni_sim_core
+under Pyodide and needs nothing from ROS -- the two halves are independent, so
+whichever one is not running simply shows as unavailable.
+
+omni_sim_ros/web/dashboard.html is now a redirect to it.
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument

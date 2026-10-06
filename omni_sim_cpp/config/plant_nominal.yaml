@@ -1,0 +1,28 @@
+# Nominal model parameters.
+#
+# This is what the controller BELIEVES the robot is. It is deliberately wrong in
+# two documented ways so the model error can be studied:
+#
+#   * mass is 10% light  (10.8 kg vs the true 12.0 kg)
+#   * viscous_friction is 0  (the controller assumes a frictionless drivetrain)
+#
+# Keep the geometry identical to the true plant unless you are specifically
+# studying a kinematic mismatch; the interesting error here is dynamic, not
+# geometric.
+
+label: "nominal"
+
+chassis:
+  mass: 10.8             # [kg]   deliberately 10% lighter than the true 12.0
+  inertia_zz: 0.45       # [kg*m^2]
+  wheel_radius: 0.05     # [m]
+  mount_radius: 0.20     # [m]
+
+  mount_angle_deg: [45.0, 135.0, 225.0, 315.0]
+  drive_angle_deg: [135.0, 225.0, 315.0, 45.0]
+
+motor:
+  k_t: 0.042             # [N*m/A]
+  resistance: 1.2        # [Ohm]
+  viscous_friction: 0.0  # [N*m/(rad/s)]  nominal model assumes no friction
+  gear_ratio: 19.0

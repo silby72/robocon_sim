@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>omni_sim_ros</name>
+  <version>0.1.0</version>
+  <description>
+    ROS 2 (Jazzy) wrapper around omni_sim_core. sim_node runs the true plant and
+    publishes sensor topics; controller_node runs on the nominal model and sends
+    wheel-torque commands. The two deliberately load different YAML files.
+  </description>
+  <maintainer email="riko26maeda@gmail.com">maeda</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>std_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>rosgraph_msgs</depend>
+  <depend>yaml-cpp</depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

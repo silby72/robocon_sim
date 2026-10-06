@@ -1,0 +1,5 @@
+# C++ build output
+**/build/
+# ROS 2 colcon output (Step 4)
+install/
+log/

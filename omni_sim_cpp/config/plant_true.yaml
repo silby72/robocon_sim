@@ -1,0 +1,27 @@
+# True plant parameters.
+#
+# This is the "real" robot the simulator (sim_node) integrates. The controller
+# is NOT allowed to read this file; it reads plant_nominal.yaml instead. The gap
+# between the two is exactly what the disturbance observer must reconstruct.
+#
+# Angles are given in degrees for readability and converted to radians on load.
+
+label: "true"
+
+chassis:
+  mass: 12.0             # [kg]   total robot mass
+  inertia_zz: 0.45       # [kg*m^2] yaw moment of inertia about the body center
+  wheel_radius: 0.05     # [m]    shared by all four wheels
+  mount_radius: 0.20     # [m]    body center -> wheel contact point
+
+  # 4 wheels in an X-configuration. Index order is 0..3.
+  # mount_angle: where the wheel sits, measured from body +x.
+  # drive_angle: the direction the wheel drives (rollers free-roll perpendicular).
+  mount_angle_deg: [45.0, 135.0, 225.0, 315.0]
+  drive_angle_deg: [135.0, 225.0, 315.0, 45.0]
+
+motor:
+  k_t: 0.042             # [N*m/A]           torque constant
+  resistance: 1.2        # [Ohm]             winding resistance
+  viscous_friction: 0.001  # [N*m/(rad/s)]   viscous friction at the wheel
+  gear_ratio: 19.0       # motor_speed / wheel_speed
